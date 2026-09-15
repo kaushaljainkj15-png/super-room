@@ -675,6 +675,8 @@ async function initCameraMic() {
         localStream.getVideoTracks().forEach(t => t.enabled = false);
 
         document.getElementById('wrapper-local').classList.add('video-off');
+        const overlay = document.getElementById('mediaBlockOverlay');
+        if (overlay) overlay.remove();
         
         const micBtn = document.getElementById('micBtn');
         const camBtn = document.getElementById('camBtn');
@@ -699,11 +701,17 @@ async function initCameraMic() {
         
         const localVidBox = document.getElementById('wrapper-local');
         if (localVidBox) {
-            localVidBox.innerHTML = `
-                <div style="display:flex; height:100%; width:100%; align-items:center; justify-content:center; color:#666; flex-direction:column; text-align:center; padding:20px; box-sizing:border-box;">
-                    <i class="fas fa-video-slash" style="font-size:2rem; margin-bottom:10px; color:#ff4444;"></i>
-                    <span style="font-size:0.8rem; text-transform:uppercase; letter-spacing:1px;">Media Blocked</span>
-                </div>`;
+            let errorOverlay = document.getElementById('mediaBlockOverlay');
+            if (!errorOverlay) {
+                errorOverlay = document.createElement('div');
+                errorOverlay.id = 'mediaBlockOverlay';
+                errorOverlay.style.cssText = 'position:absolute; top:0; left:0; right:0; bottom:0; display:flex; height:100%; width:100%; align-items:center; justify-content:center; color:#666; flex-direction:column; text-align:center; padding:20px; box-sizing:border-box; background:#050505; z-index:5;';
+                localVidBox.appendChild(errorOverlay);
+            }
+            errorOverlay.innerHTML = `
+                <i class="fas fa-video-slash" style="font-size:2rem; margin-bottom:10px; color:#ff4444;"></i>
+                <span style="font-size:0.8rem; text-transform:uppercase; letter-spacing:1px;">Media Blocked</span>
+            `;
         }
     }
 }
@@ -1736,7 +1744,14 @@ const dataChannelHandlers = {
             createOrLoadYtVideo(msg.ytVid, {
                 startTime: targetTime,
                 muted: true,
-                onReadyExtra: player => player.playVideo()
+                autoplay: msg.ytState === 1 ? 1 : 0,
+                onReadyExtra: player => {
+                    if (msg.ytState === 1) {
+                        player.playVideo();
+                    } else if (msg.ytState === 2) {
+                        player.pauseVideo();
+                    }
+                }
             });
         }
 
@@ -2733,6 +2748,9 @@ window.addEventListener('resize', () => {
 
 // PRIORITY 21: MOBILE TOUCH DRAWING & APPLE PENCIL SUPPORT
 // Upgraded from MouseEvents to PointerEvents so it works flawlessly on all touchscreens.
+canvas.addEventListener('touchstart', e => { if(currentWbTool !== 'none') e.preventDefault(); }, {passive: false});
+canvas.addEventListener('touchmove', e => { if(currentWbTool !== 'none') e.preventDefault(); }, {passive: false});
+
 canvas.onpointerdown = e => { 
     if(currentWbTool === 'none') return;
     
@@ -2758,8 +2776,8 @@ canvas.onpointerdown = e => {
         const color = document.getElementById('wbColorPicker').value;
         
         i.style.position = 'absolute'; 
-        i.style.left = e.offsetX + 'px'; 
-        i.style.top = (e.offsetY - (s*3)) + 'px'; 
+        i.style.left = (e.clientX - rect.left) + 'px'; 
+        i.style.top = (e.clientY - rect.top - (s*3)) + 'px'; 
         i.style.font = fontStr; 
         i.style.color = color; 
         i.style.background = 'transparent'; 
@@ -3480,12 +3498,12 @@ function hideYtLoadingOverlay() {
 }
 
 function createOrLoadYtVideo(videoId, opts = {}) {
-    const { startTime = 0, muted = true, onReadyExtra = null, retries = 10 } = opts;
+    const { startTime = 0, muted = true, onReadyExtra = null, retries = 10, autoplay = 1 } = opts;
     showYtLoadingOverlay();
 
     if (!window.ytApiReady || typeof YT === 'undefined' || !YT.Player) {
         if (retries > 0) {
-            setTimeout(() => createOrLoadYtVideo(videoId, { startTime, muted, onReadyExtra, retries: retries - 1 }), 500);
+            setTimeout(() => createOrLoadYtVideo(videoId, { startTime, muted, onReadyExtra, retries: retries - 1, autoplay }), 500);
         } else {
             console.warn("YouTube API failed to initialize.");
             logSystemMsg("YouTube connection failed.");
@@ -3507,7 +3525,7 @@ function createOrLoadYtVideo(videoId, opts = {}) {
 
     ytPlayer = new YT.Player('ytPlayer', {
         height: '100%', width: '100%', videoId: videoId,
-        playerVars: { 'autoplay': 1, 'controls': 1, 'mute': muted ? 1 : 0, 'rel': 0, 'start': Math.floor(startTime), 'origin': window.location.origin },
+        playerVars: { 'autoplay': autoplay, 'controls': 1, 'mute': muted ? 1 : 0, 'rel': 0, 'start': Math.floor(startTime), 'origin': window.location.origin },
         events: {
             'onReady': e => {
                 if (muted) window.guestNeedsUnmute = true;
