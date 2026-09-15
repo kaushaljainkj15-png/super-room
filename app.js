@@ -441,7 +441,10 @@ window.toggleCustomVolume = function() {
 // --- YOUTUBE MASTER SYNC ENGINE ---
 // The Host fires a unified Master Sync pulse every 1 second.
 setInterval(() => {
-    if (isHost && window.magnetMode && currentYtVideoId && typeof ytPlayer !== 'undefined' && typeof ytPlayer.getCurrentTime === 'function') {
+    // FIX: YouTube playback is always a single shared room screen - there's no such
+    // thing as an "independent" guest video - so it should always stay in sync,
+    // not just when the separate Magnet Mode (navigation-lock) feature is on.
+    if (isHost && currentYtVideoId && typeof ytPlayer !== 'undefined' && typeof ytPlayer.getCurrentTime === 'function') {
         const actualState = ytPlayer.getPlayerState();
         if (actualState === 1 || actualState === 2 || actualState === 3) {
             broadcastData({
@@ -1939,7 +1942,9 @@ const dataChannelHandlers = {
 
     // --- YT MASTER SYNC ---
     'yt-master-sync': (msg, conn) => { if (!isHost && conn.peer !== currentRoomHostId) return;
-        if (isHost || !window.isGuestMagnetized || typeof ytPlayer === 'undefined' || typeof ytPlayer.getCurrentTime !== 'function') return;
+        // FIX: guests now always follow the Host's YouTube video (there's no independent
+        // guest playback anyway) instead of only when Magnet Mode happens to be on.
+        if (isHost || typeof ytPlayer === 'undefined' || typeof ytPlayer.getCurrentTime !== 'function') return;
         let targetState = msg.state;
         let targetVid = msg.vidId || currentYtVideoId;
         let myTime = ytPlayer.getCurrentTime() || 0;
@@ -3510,7 +3515,7 @@ function createOrLoadYtVideo(videoId, opts = {}) {
                 hideYtLoadingOverlay();
             },
             'onStateChange': e => {
-                if (!isHost || !window.magnetMode) return;
+                if (!isHost) return;
                 const s = ytPlayer.getPlayerState();
                 if (s === 1 || s === 2 || s === 3) {
                     broadcastData({ type: 'yt-master-sync', vidId: currentYtVideoId, time: ytPlayer.getCurrentTime(), state: s });
@@ -3529,6 +3534,26 @@ function createOrLoadYtVideo(videoId, opts = {}) {
     // swallows the onReady/onError events.
     setTimeout(hideYtLoadingOverlay, 8000);
 }
+// Shared "actually broadcast this video to the room" step - used by both the
+// paste-a-link flow (triggerYouTubeSync) and picking a result from search
+// (pickYtSearchResult), so there's only one path that does the real work.
+function broadcastYtVideo(vidId) {
+    if (!isHost) {
+        alert("Only the Host can broadcast a new video to the room.");
+        return;
+    }
+    currentYtVideoId = vidId;
+    switchMainStage('youtubeLayer');
+
+    if (typeof addResourceToCabinet === 'function') addResourceToCabinet('YouTube Video', 'youtube', `https://youtube.com/watch?v=${vidId}`, 'fab fa-youtube');
+
+    // Host plays unmuted by default (their own explicit click = user gesture, so autoplay-with-sound is allowed)
+    createOrLoadYtVideo(vidId, { muted: false });
+
+    broadcastData({type: 'yt-load', vidId: vidId});
+    logSystemMsg("Broadcasting YouTube media.");
+}
+
 function triggerYouTubeSync() { 
     if (!isHost) {
         alert("Only the Host can broadcast a new video to the room.");
@@ -3542,20 +3567,125 @@ function triggerYouTubeSync() {
     const vidId = match ? match[1] : input;
 
     if (vidId.length === 11) {
-        currentYtVideoId = vidId; 
-        switchMainStage('youtubeLayer'); 
-        
-        if (typeof addResourceToCabinet === 'function') addResourceToCabinet('YouTube Video', 'youtube', `https://youtube.com/watch?v=${vidId}`, 'fab fa-youtube');
-        
-        // Host plays unmuted by default (their own explicit click = user gesture, so autoplay-with-sound is allowed)
-        createOrLoadYtVideo(vidId, { muted: false });
-        
-        broadcastData({type: 'yt-load', vidId: vidId}); 
-        logSystemMsg("Broadcasting YouTube media."); 
+        broadcastYtVideo(vidId);
         document.getElementById('ytInput').value = ''; 
     } else {
         alert("Invalid YouTube Link. Please paste a standard YouTube URL.");
     }
+}
+
+// ==========================================
+// YOUTUBE SEARCH (Host only)
+// Uses the public YouTube Data API v3 "search" endpoint. Requires the Host to
+// supply their own free API key (see the collapsible box in the panel) since
+// this is a static client-side app with no backend to hide a shared key behind -
+// any key baked into the code would be visible to anyone and could be abused.
+// ==========================================
+function saveYtApiKey() {
+    const key = document.getElementById('ytApiKeyInput').value.trim();
+    try { localStorage.setItem('superroom_yt_api_key', key); } catch (e) { console.warn("Could not save YouTube API key:", e); }
+}
+
+window.addEventListener('load', () => {
+    const keyInput = document.getElementById('ytApiKeyInput');
+    if (!keyInput) return;
+    try {
+        const savedKey = localStorage.getItem('superroom_yt_api_key');
+        if (savedKey) keyInput.value = savedKey;
+    } catch (e) { /* localStorage unavailable, ignore */ }
+});
+
+function renderYtSearchResults(items) {
+    const box = document.getElementById('ytSearchResults');
+    box.innerHTML = '';
+    box.style.display = 'block';
+
+    if (!items || items.length === 0) {
+        const empty = document.createElement('p');
+        empty.style.cssText = 'padding:12px; color:#888; font-size:0.75rem; margin:0;';
+        empty.textContent = 'No results found.';
+        box.appendChild(empty);
+        return;
+    }
+
+    items.forEach(item => {
+        if (!item.id || !item.id.videoId) return;
+        const vidId = item.id.videoId;
+        const title = (item.snippet && item.snippet.title) || 'Untitled';
+        const thumbUrl = item.snippet && item.snippet.thumbnails && (item.snippet.thumbnails.default || item.snippet.thumbnails.medium);
+
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex; align-items:center; gap:10px; padding:8px; cursor:pointer; border-bottom:1px solid #222;';
+        row.onmouseenter = () => row.style.background = '#111';
+        row.onmouseleave = () => row.style.background = 'transparent';
+
+        const img = document.createElement('img');
+        img.src = thumbUrl ? thumbUrl.url : '';
+        img.style.cssText = 'width:60px; height:45px; object-fit:cover; border-radius:2px; flex-shrink:0; background:#000;';
+
+        const span = document.createElement('span');
+        span.style.cssText = 'font-size:0.75rem; color:#ddd; line-height:1.3;';
+        span.textContent = title; // textContent, never innerHTML - safe against titles containing markup
+
+        row.appendChild(img);
+        row.appendChild(span);
+        row.onclick = () => pickYtSearchResult(vidId);
+        box.appendChild(row);
+    });
+}
+
+async function searchYouTube() {
+    if (!isHost) {
+        alert("Only the Host can search and broadcast video.");
+        return;
+    }
+    const query = document.getElementById('ytSearchInput').value.trim();
+    if (!query) return;
+
+    let apiKey = '';
+    try { apiKey = localStorage.getItem('superroom_yt_api_key') || ''; } catch (e) { /* ignore */ }
+
+    if (!apiKey) {
+        alert('Add your YouTube Data API key first (see "YouTube Search API Key" below) to search by name.\n\nOr just paste a direct video link/ID instead - that never needs a key.');
+        return;
+    }
+
+    const box = document.getElementById('ytSearchResults');
+    box.style.display = 'block';
+    box.innerHTML = '<p style="padding:12px; color:#888; font-size:0.75rem; margin:0;">Searching...</p>';
+
+    try {
+        const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=8&q=${encodeURIComponent(query)}&key=${encodeURIComponent(apiKey)}`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (!res.ok) {
+            const msg = (data && data.error && data.error.message) || 'Search failed. Check your API key.';
+            box.innerHTML = '';
+            const err = document.createElement('p');
+            err.style.cssText = 'padding:12px; color:#ff4444; font-size:0.75rem; margin:0;';
+            err.textContent = msg;
+            box.appendChild(err);
+            return;
+        }
+
+        renderYtSearchResults(data.items || []);
+    } catch (e) {
+        console.warn("YouTube search failed:", e);
+        box.innerHTML = '';
+        const err = document.createElement('p');
+        err.style.cssText = 'padding:12px; color:#ff4444; font-size:0.75rem; margin:0;';
+        err.textContent = 'Search request failed. Check your connection.';
+        box.appendChild(err);
+    }
+}
+
+function pickYtSearchResult(vidId) {
+    broadcastYtVideo(vidId);
+    const box = document.getElementById('ytSearchResults');
+    if (box) box.style.display = 'none';
+    const input = document.getElementById('ytSearchInput');
+    if (input) input.value = '';
 }
 
 function handleYtSync(c, hostTime) { 

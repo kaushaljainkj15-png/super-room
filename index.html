@@ -509,7 +509,21 @@
                     
                     <div id="hostMediaControls" style="display:none;">
                         <p style="color:var(--accent); font-size:0.8rem; margin-bottom: 10px; letter-spacing:2px; text-transform:uppercase;">Custom Media Embeds</p>
-                        <input type="text" id="ytInput" placeholder="YouTube Video ID" style="width:100%; padding:12px; margin-bottom:10px; background:#050505; color:white; border: 1px solid #333; border-radius: 2px; outline:none; font-family:monospace;">
+
+                        <div style="display:flex; gap:8px; margin-bottom:8px;">
+                            <input type="text" id="ytSearchInput" placeholder="Search YouTube by name..." style="flex:1; min-width:0; padding:12px; background:#050505; color:white; border: 1px solid #333; border-radius: 2px; outline:none; font-family:monospace;" onkeydown="if(event.key==='Enter'){event.preventDefault(); searchYouTube();}">
+                            <button class="btn-secondary" style="padding:0 16px; font-size:0.8rem;" onclick="searchYouTube()" title="Search"><i class="fas fa-search"></i></button>
+                        </div>
+                        <div id="ytSearchResults" style="display:none; max-height:240px; overflow-y:auto; margin-bottom:10px; border:1px solid #333; border-radius:2px; background:#050505;"></div>
+
+                        <details style="margin-bottom:15px;">
+                            <summary style="color:#888; font-size:0.7rem; cursor:pointer; letter-spacing:1px; text-transform:uppercase;">YouTube Search API Key (needed for search)</summary>
+                            <input type="text" id="ytApiKeyInput" placeholder="Paste your YouTube Data API v3 key" style="width:100%; padding:10px; margin-top:8px; background:#050505; color:white; border: 1px solid #333; border-radius: 2px; outline:none; font-family:monospace; font-size:0.75rem; box-sizing:border-box;" onchange="saveYtApiKey()">
+                            <p style="color:#666; font-size:0.65rem; margin-top:6px; line-height:1.4;">Only needed to search by name - pasting a direct link/ID below never needs a key. Get a free key from the Google Cloud Console (enable "YouTube Data API v3"). It's saved only in your own browser, never sent to our server.</p>
+                        </details>
+
+                        <p style="color:#666; font-size:0.7rem; margin-bottom:8px;">...or paste a direct link/ID:</p>
+                        <input type="text" id="ytInput" placeholder="YouTube Video ID or Link" style="width:100%; padding:12px; margin-bottom:10px; background:#050505; color:white; border: 1px solid #333; border-radius: 2px; outline:none; font-family:monospace;">
                         <button class="btn" style="width:100%; margin-bottom:25px; font-size:0.8rem;" onclick="triggerYouTubeSync()">Broadcast YT Video</button>
                         
                         <input type="text" id="browserInput" placeholder="Website URL" style="width:100%; padding:12px; margin-bottom:10px; background:#050505; color:white; border: 1px solid #333; border-radius: 2px; outline:none; font-family:monospace;">
