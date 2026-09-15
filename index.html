@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ultimate Collaborative Platform - 3D Master Edition</title>
+    
+    <!-- Google Fonts for Luxury Aesthetic -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:ital,wght@0,400;0,600;0,700;1,400&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+<!-- Core Dependencies -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Security: DOMPurify for Chat XSS Protection -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+    <!-- Media Players -->
+        
+    
+   <!-- Multiplayer Chess Engine & Visuals -->
+    <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    
+    <!-- Code Editor (HTML/JS/CSS Mixed Mode) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/theme/monokai.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/mode/xml/xml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/mode/javascript/javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/mode/css/css.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.12/mode/htmlmixed/htmlmixed.min.js"></script>
+    
+    <!-- PDF & Markdown -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.6.347/pdf.min.js"></script>
+    <script>pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.6.347/pdf.worker.min.js';</script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+  <!-- AI Gestures -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<!-- Firebase SDKs -->
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+  <!-- Link Local Styles and Scripts -->
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+</head>
+<body class="theme-default">
+
+<!-- 3D THEME BACKGROUND WRAPPER -->
+<div id="theme-3d-bg">
+    <!-- Matrix Theme Elements -->
+    <div class="theme-layer layer-matrix">
+        <div class="matrix-grid"></div>
+    </div>
+    
+    <!-- Neon Synthwave Theme Elements -->
+    <div class="theme-layer layer-synth">
+        <div class="synth-sun"></div>
+        <div class="synth-grid"></div>
+    </div>
+    
+    <!-- Hyperspace Theme Elements -->
+    <div class="theme-layer layer-space">
+        <div class="hyper-star" style="left: 20%; top: 30%; animation-delay: 0s;"></div>
+        <div class="hyper-star" style="left: 80%; top: 40%; animation-delay: 0.2s;"></div>
+        <div class="hyper-star" style="left: 40%; top: 80%; animation-delay: 0.4s;"></div>
+        <div class="hyper-star" style="left: 70%; top: 70%; animation-delay: 0.6s;"></div>
+        <div class="hyper-star" style="left: 30%; top: 20%; animation-delay: 0.8s;"></div>
+        <div class="hyper-star" style="left: 60%; top: 10%; animation-delay: 1.0s;"></div>
+        <div class="hyper-star" style="left: 90%; top: 80%; animation-delay: 1.2s;"></div>
+        <div class="hyper-star" style="left: 10%; top: 60%; animation-delay: 1.4s;"></div>
+    </div>
+</div>
+
+<div id="app">
+    <!-- LOBBY VIEW -->
+    <div id="lobbyView" class="view active-block">
+        
+        <!-- Glowing 3D Rose Structure Background (Default) -->
+        <div class="rose-3d-container" id="roseCenterElement">
+            <div class="rose-3d-core">
+                <div class="rose-petal-3d"></div>
+                <div class="rose-petal-3d"></div>
+                <div class="rose-petal-3d"></div>
+                <div class="rose-petal-3d"></div>
+                <div class="rose-petal-3d"></div>
+                <div class="rose-petal-3d"></div>
+            </div>
+        </div>
+        
+        <!-- Animated Falling Red Petals (Default) -->
+        <div class="particle-container" id="particleContainer"></div>
+
+        <header class="lobby-header">
+            <div class="lobby-logo">SuperRoom <span style="color:var(--accent);">Pro</span></div>
+            
+            <div style="display:flex; gap: 15px; align-items:center;">
+                <!-- 3D THEME DROPDOWN -->
+                <select class="theme-selector" onchange="changeTheme(this.value)">
+                    <option value="theme-default">3D Rose Core</option>
+                    <option value="theme-matrix">3D Cyber Matrix</option>
+                    <option value="theme-synthwave">3D Synthwave</option>
+                    <option value="theme-space">3D Deep Space</option>
+                </select>
+            </div>
+        </header>
+
+        <div class="lobby-title-area">
+            <div class="lobby-subtitle">The Pinnacle of Collaboration</div>
+            <h1>Super<br><span>Room</span></h1>
+            <div class="lobby-sub-bottom">Where Your Ideas Flourish</div>
+        </div>
+
+  <div class="lobby-toolbar" id="authSection">
+            <button class="btn-secondary" onclick="signInWithGoogle()"><i class="fab fa-google" style="margin-right: 10px;"></i> Sign in with Google to Access</button>
+        </div>
+
+        <div class="lobby-toolbar" id="roomControls" style="display: none;">
+            <div id="userInfo" style="color: white; align-self: center; font-size: 0.9rem; margin-right: 15px; font-weight: 500;"></div>
+
+     <button class="btn-secondary" onclick="openSocialHub()">Friends & Chats</button>
+<button class="btn" onclick="toggleSetupPanel()">Reserve a Space</button>
+
+<div class="join-wrapper">
+    <input type="text" id="lobbyJoinId" placeholder="Access Code" maxlength="5">
+    <button class="btn" style="border-radius:0 4px 4px 0;" onclick="joinRoom()">Enter</button>
+</div>
+
+<!-- GUEST PIN INPUT (Moved below the wrapper so it doesn't break the buttons) -->
+<div style="margin-top: 15px; max-width: 300px; margin-left: auto; margin-right: auto;">
+    <input type="password" id="lobbyJoinPin" placeholder="Room Passcode (if required)" style="width:100%; padding:12px; background:#050505; color:white; border:1px solid #333; border-radius:4px; outline:none; text-align: center; letter-spacing: 2px;">
+</div>
+
+            <button class="btn-danger" style="padding: 12px 15px;" onclick="signOut()" title="Sign Out"><i class="fas fa-sign-out-alt"></i></button>
+            <button id="adminBtn" class="btn-danger" style="display: none; padding: 12px 15px;" onclick="openAdminDashboard()" title="Admin Control Panel"><i class="fas fa-crown"></i> Admin</button>
+
+            <button id="returnMainRoomBtn" class="btn-secondary" style="display:none;" onclick="returnToMain()">Return to Main Room</button>
+        </div>
+
+<div id="setupPanel">
+    <h3 class="serif-text" style="color:var(--accent); font-size:1.5rem; text-align:center; margin-bottom: 30px; letter-spacing:3px;">Configure Your Space</h3>
+    
+   <div class="setup-row">
+                <input type="text" id="roomNameInput" placeholder="Space Designation (e.g. Design Sync)">
+                <select id="roomTopicInput">
+                    <option value="Language Exchange">Language Exchange</option>
+                    <option value="Software Dev">Software Dev</option>
+                    <option value="Casual Chat">Casual Chat</option>
+                    <option value="Gaming">Gaming</option>
+                    <option value="Music & Art">Music & Art</option>
+                </select>
+                <select id="roomCapacityInput">
+                    <option value="2">Intimate (2 Members)</option>
+                    <option value="4">Standard (4 Members)</option>
+                    <option value="8">Expanded (8 Members)</option>
+                </select>
+            </div>
+
+    <!-- HOST PIN INPUT -->
+    <div style="margin-bottom: 20px;">
+        <label class="serif-text" style="color:var(--text-light); font-size:0.8rem; letter-spacing:1px; text-transform:uppercase;">Room Passcode (Optional)</label>
+        <input type="text" id="roomPinInput" placeholder="Leave blank for public room" style="width:100%; padding:12px; background:#050505; color:white; border:1px solid #333; border-radius:2px; margin-top:5px; outline:none; font-family:monospace;">
+    </div>
+
+    <button class="btn" style="width: 100%; padding:15px;" onclick="hostRoom()">Establish Space</button>
+</div>
+
+<!-- Public Rooms Directory List (Moved Below) -->
+<!-- Public Rooms Directory List (Moved Below) -->
+        <div id="publicRoomsContainer" style="max-width: 800px; margin: 40px auto; padding: 20px; background: rgba(10,0,0,0.8); border: 1px solid var(--border-color); border-radius: 4px; position: relative; z-index: 10;">
+            <h3 class="serif-text" style="color: var(--accent); font-size: 1.2rem; margin-bottom: 15px; letter-spacing: 2px; text-align: center;">Active Public Spaces</h3>
+            <div id="roomsListGrid" style="display: flex; flex-direction: column; gap: 10px; max-height: 250px; overflow-y: auto;">
+                <p style="color: #666; text-align: center; font-style: italic; font-size: 0.85rem;">Searching for active spaces...</p>
+            </div>
+        </div>   
+    </div> <!-- THIS IS THE MISSING TAG THAT FIXES THE BLACK SCREEN -->
+
+    <!-- ROOM VIEW -->
+    <div id="roomView" class="view">
+        <div id="mobileDrawerOverlay" class="mobile-overlay" onclick="toggleMobileDrawer()"></div>
+        <div class="main-stage">
+            
+            <div id="sharedTimerDisplay">00:00</div>
+            <div id="liveCaptions"></div>
+
+            <!-- COLLAPSIBLE TOP CONTROLS -->
+          <div id="topControlsWrapper">
+          <div class="top-controls">
+                    <button id="micBtn" aria-label="Toggle Microphone" title="Mic (M)"><i class="fas fa-microphone-slash"></i></button>
+                    <button id="camBtn" aria-label="Toggle Camera" title="Camera (V)"><i class="fas fa-video-slash"></i></button>
+                    <button id="switchCamBtn" aria-label="Switch Camera" onclick="switchCamera()" title="Flip Front/Back Camera"><i class="fas fa-sync-alt"></i></button>
+                    <button id="screenBtn" aria-label="Share Screen" title="Share Screen"><i class="fas fa-desktop"></i></button>
+                    <button id="handBtn" aria-label="Raise Hand" onclick="toggleHandRaise()" title="Raise Hand (H)"><i class="fas fa-hand-paper"></i></button>
+                  <button id="captionBtn" aria-label="Live Captions" onclick="toggleCaptions()" title="Live Captions (C)"><i class="fas fa-closed-captioning"></i></button>
+                    <button id="reactionToggleBtn" aria-label="Reactions" onclick="toggleReactionBar()" title="Reactions (E)"><i class="fas fa-smile"></i></button>
+                    <button id="aiGestureBtn" aria-label="AI Gestures" onclick="toggleGestures()" title="AI Hand Gestures"><i class="fas fa-hand-sparkles"></i></button>
+                  <button id="recordBtn" aria-label="Record Session" onclick="toggleRecording()" title="Record"><i class="fas fa-circle"></i></button>
+                    <button id="forceSyncBtn" aria-label="Force Audience Sync" onclick="forceSyncStage()" title="Pull Audience to My Screen" style="display:none; border-color:#00ff66; color:#00ff66;"><i class="fas fa-magnet"></i></button>
+                    <button class="danger" aria-label="Leave Room" onclick="leaveRoom()"><i class="fas fa-phone-slash"></i></button>
+                </div>
+                <button id="mobileDrawerBtn" class="mobile-drawer-btn" aria-label="Toggle Menu" onclick="toggleMobileDrawer()" title="Menu" style="background:var(--accent); border:none; color:white; font-size:1.1rem; cursor:pointer; width:45px; height:45px; border-radius:50%; margin-left:5px;"><i class="fas fa-bars"></i></button>
+                <button id="topBarToggleBtn" aria-label="Toggle Top Controls" onclick="toggleTopBar()" title="Hide/Unhide Controls"><i class="fas fa-chevron-up"></i></button>
+            </div>
+
+           <!-- DRAGGABLE PIP VIDEO LAYER -->
+
+<div id="videoLayer" class="stage-container active-stage video-grid-full">
+    <div id="wrapper-local" class="video-wrapper video-off">
+        <video id="localVideo" autoplay muted playsinline></video>
+        <div class="video-avatar">
+            <div class="voice-pulse pulse-anim"><i class="fas fa-microphone"></i></div>
+        </div>
+    </div>
+</div>
+
+
+        <div id="screenLayer" class="stage-container">
+                <video id="sharedScreenVideo" autoplay playsinline style="width:100%; height:100%; object-fit:contain;"></video>
+            </div>
+            
+            <!-- WHITEBOARD WITH ALL 7 BRUSHES -->
+            <div id="whiteboardLayer" class="stage-container">
+                <div class="wb-toolbar">
+                    <button class="wb-btn active" title="Pen" onclick="setWbTool('pen', this)"><i class="fas fa-pen"></i></button>
+                    <button class="wb-btn" title="Pencil" onclick="setWbTool('pencil', this)"><i class="fas fa-pencil-alt"></i></button>
+                    <button class="wb-btn" title="Marker" onclick="setWbTool('marker', this)"><i class="fas fa-marker"></i></button>
+                    <button class="wb-btn" title="Highlighter" onclick="setWbTool('highlighter', this)"><i class="fas fa-highlighter"></i></button>
+                    <button class="wb-btn" title="Brush" onclick="setWbTool('brush', this)"><i class="fas fa-paint-brush"></i></button>
+                    <button class="wb-btn" title="Eraser" onclick="setWbTool('eraser', this)"><i class="fas fa-eraser"></i></button>
+                    <button class="wb-btn" title="Text" onclick="setWbTool('text', this)"><i class="fas fa-font"></i></button>
+                    
+                    <button class="wb-btn" title="Stamp" onclick="document.getElementById('stampUpload').click()"><i class="fas fa-stamp"></i></button>
+                    <input type="file" id="stampUpload" style="display:none;" accept="image/*" onchange="handleStampUpload(event)">
+                    
+                    <button class="wb-btn" style="color:#ff4444;" title="Clear Board" onclick="clearWhiteboard(true)"><i class="fas fa-trash"></i></button>
+                    
+                    <div style="width:100%; height:1px; background:var(--border-color); margin: 5px 0;"></div>
+                    <button class="wb-btn" style="font-size:0.8rem; padding:10px;" onclick="changeWbPage(-1, true)"><i class="fas fa-chevron-left"></i></button>
+                    <button class="wb-btn" style="font-size:0.8rem; padding:10px;" onclick="changeWbPage(1, true)"><i class="fas fa-chevron-right"></i></button>
+                    <div id="wbPageIndicator" style="font-size:0.6rem; color:#aaa; margin:3px 0; text-align:center;">Page 1</div>
+                    <button class="wb-btn" onclick="exportWhiteboard()"><i class="fas fa-download"></i></button>
+                    
+                    <div style="width:100%; height:1px; background:var(--border-color); margin: 5px 0;"></div>
+                    <button class="wb-btn" style="color:var(--accent);" title="Pictionary" onclick="startPictionary()"><i class="fas fa-palette"></i></button>
+                    <div style="width:100%; height:1px; background:var(--border-color); margin: 5px 0;"></div>
+                    
+                    <input type="range" id="wbSizeSlider" style="width:100%; margin:10px 0; cursor:pointer;" min="1" max="50" value="4">
+                    <input type="color" id="wbColorPicker" style="width:100%; height:30px; border:none; padding:0; cursor:pointer; background:transparent;" value="#e60000">
+                </div>
+                <canvas id="whiteboard" style="background:#0a0a0a;"></canvas>
+            </div>
+
+            <!-- RESTORED DEVELOPMENT STUDIO -->
+            <div id="codeLayer" class="stage-container">
+                <div class="media-box" style="width:95%; height:90%; flex-direction:row; display:flex;">
+                    
+                    <!-- Left Side: Code Editor (Forced 50%) -->
+                    <div class="code-pane" style="flex: 1; min-width: 0; width: 50%; height:100%; display:flex; flex-direction:column; border-right:1px solid var(--border-color);">
+                        <div style="width:100%; background:#0a0a0a; padding:15px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color);">
+                            <span style="color:var(--accent); font-weight:bold; letter-spacing:2px; font-family:'Cinzel',serif;"><i class="fas fa-code"></i> Development</span>
+                            <button class="btn" style="padding: 8px 20px; font-size: 0.75rem;" onclick="runCode()"><i class="fas fa-play"></i> Run Code</button>
+                        </div>
+                        <div style="flex:1; overflow:hidden; position:relative;">
+                            <textarea id="codeEditorArea"></textarea>
+                        </div>
+                    </div>
+                    
+                    <!-- Right Side: Live Preview (Forced 50%) -->
+                    <div class="code-output-pane" style="flex: 1; min-width: 0; width: 50%; background:#fff; height:100%;">
+                        <iframe id="codeOutput" style="width:100%; height:100%; border:none;"></iframe>
+                    </div>
+                    
+                </div>
+            </div>
+            
+            <!-- MARKDOWN STUDIO -->
+            <div id="markdownLayer" class="stage-container">
+                <div class="media-box" style="width:95%; height:90%;">
+                    <div style="width:100%; background:#0a0a0a; padding:15px 25px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color);">
+                        <span style="color:var(--accent); font-weight:bold; letter-spacing:2px; font-family:'Cinzel',serif;"><i class="fab fa-markdown"></i> Markdown Studio</span>
+                        <button class="btn" style="padding: 8px 20px; font-size: 0.75rem;" onclick="exportMarkdown()"><i class="fas fa-file-export"></i> Export HTML</button>
+                    </div>
+                    <div class="md-container">
+                        <div class="md-pane"><textarea id="mdInput" placeholder="# Documentation Notes..."></textarea></div>
+                        <div class="md-pane"><div id="mdOutput"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- QUIZ SHOW -->
+            <div id="quizLayer" class="stage-container">
+                <div class="quiz-panel" id="quizDisplay">
+                    <h1 class="serif-text" style="color:var(--accent); font-size:3rem; margin-bottom:20px;">Quiz Loading...</h1>
+                    <p style="color:#aaa; letter-spacing: 2px;">Awaiting the host to commence the round.</p>
+                </div>
+            </div>
+
+            <!-- WEB BROWSER -->
+            <div id="browserLayer" class="stage-container">
+                <div class="media-box">
+                    <div style="width:100%; background:#0a0a0a; padding:15px; display:flex; justify-content:space-between; border-bottom:1px solid var(--border-color);">
+                        <span style="color:#888; font-size:0.8rem; align-self:center; letter-spacing:1px;">Use Fallback if blocked by security rules.</span>
+                        <a id="externalLinkBtn" href="#" target="_blank" class="btn-secondary" style="padding: 8px 20px; text-decoration: none; font-size: 0.75rem;">New Tab Default</a>
+                    </div>
+                    <iframe id="sharedBrowser" sandbox="allow-same-origin allow-scripts allow-forms allow-popups" style="flex:1; border:none; width:100%; height:100%; background:white;"></iframe>
+                </div>
+            </div>
+            
+          <div id="youtubeLayer" class="stage-container">
+                <div class="media-box" style="border:none; position:relative; background:#000;">
+                    <div id="ytPlayer" data-initial-vid="" data-initial-time="0"></div>
+<!-- LOADING OVERLAY: covers the player with a dark background + spinner while the
+     YouTube iframe boots up, instead of letting the iframe's own white flash show
+     through (this was the "white screen first on mobile" issue). Shown by
+     showYtLoadingOverlay() / hidden by hideYtLoadingOverlay() in app.js. -->
+                    <div id="ytLoadingOverlay" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:40; background:#000; align-items:center; justify-content:center; flex-direction:column; color:#888;">
+                        <i class="fas fa-circle-notch fa-spin" style="font-size:2rem; color:var(--accent); margin-bottom:10px;"></i>
+                        <span style="font-size:0.75rem; letter-spacing:1px; text-transform:uppercase;">Loading video...</span>
+                    </div>
+<!-- GUEST GLASS SHIELD (Magnet Mode): Total Lockdown + Custom Fullscreen -->
+                    <div id="ytGuestShield" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:50;">
+                        <!-- The invisible shield that blocks all native YouTube controls -->
+                        <div style="position:absolute; top:0; left:0; width:100%; height:100%; background:transparent; pointer-events:auto;"></div>
+                        
+                 <!-- CUSTOM SECURE GUEST CONTROLS (CC, Volume, Fullscreen) -->
+                        <div style="position:absolute; bottom:15px; right:20px; z-index:60; display:flex; gap:10px; pointer-events:auto;">
+                            <button onclick="event.stopPropagation(); toggleCustomCC();" style="background:rgba(0,0,0,0.8); color:white; border:none; padding:8px 12px; border-radius:4px; cursor:pointer;" title="Toggle Subtitles">
+                                <i class="fas fa-closed-captioning"></i>
+                            </button>
+                            <button id="customVolBtn" onclick="event.stopPropagation(); toggleCustomVolume();" style="background:rgba(0,0,0,0.8); color:white; border:none; padding:8px 12px; border-radius:4px; cursor:pointer;" title="Mute/Unmute">
+                                <i class="fas fa-volume-up"></i>
+                            </button>
+                            <button onclick="event.stopPropagation(); toggleCustomFullscreen();" style="background:rgba(0,0,0,0.8); color:white; border:none; padding:8px 12px; border-radius:4px; cursor:pointer;" title="Fullscreen">
+                                <i class="fas fa-expand"></i>
+                            </button>
+                        </div>
+                    </div>
+</div>
+            </div>
+            
+            <!-- FILE & PDF VIEWER -->
+            <div id="mediaLayer" class="stage-container">
+                <div class="media-box" id="mediaRenderContainer" style="background:#0a0a0a; border:1px solid var(--border-color); width: 95%; height: 90%;">
+                    <p style="color:#666; letter-spacing:2px; text-transform:uppercase;">No media presented.</p>
+                </div>
+            </div>
+            
+            <!-- GAMES LAYER -->
+            <div id="gameLayer" class="stage-container">
+                <div class="media-box" style="background: transparent; border:none; box-shadow:none; padding: 20px; overflow-y:auto; justify-content: center;">
+                    <div style="display:flex; gap:15px; margin-bottom:40px; width: 100%; justify-content: center;">
+                        <button onclick="initChess()" id="btnGameChess" class="btn">Pro Chess</button>
+                    </div>
+                    
+              <div id="chessContainer" style="display:flex; flex-direction:column; align-items:center;">
+                        <div class="chess-seat-row" style="display:flex; gap:15px; margin-bottom:15px; width:440px; justify-content:space-between;">
+                            <button id="btnSitWhite" onclick="takeChessSeat('w')" class="btn-secondary" style="flex:1;">Sit White</button>
+                            <button id="btnSitBlack" onclick="takeChessSeat('b')" class="btn-secondary" style="flex:1;">Sit Black</button>
+                        </div>
+                        <div id="chessBoard" style="width: 440px; border: 8px solid var(--border-color); border-radius: 4px; box-shadow: 0 20px 50px rgba(0,0,0,0.8);"></div>
+                        <button onclick="resetChess(true)" class="btn-secondary" style="margin-top:30px;">Restart Match</button>
+                    </div>
+                </div>
+            </div>
+            
+           </div>
+
+        <!-- SIDEBAR -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <button class="mobile-drawer-btn" onclick="toggleMobileDrawer()" style="position:absolute; top:15px; right:15px; background:none; border:none; color:#ff4444; font-size:1.5rem; cursor:pointer;"><i class="fas fa-times"></i></button>
+                <p style="color:#666; font-size:0.75rem; letter-spacing:2px; text-transform:uppercase;">Space Identification</p>
+                <div id="uiShortId">---</div>
+                <div id="uiStatus" style="color:#444; font-size:0.75rem; margin-top:10px; letter-spacing:1px; text-transform:uppercase;">Initializing...</div>
+            </div>
+            
+           <div class="sidebar-tabs" role="tablist" aria-label="Sidebar Navigation">
+                <button onclick="switchSidebarTab('chat')" id="btn-chat" class="active" aria-label="Chat Tab" role="tab" aria-selected="true"><i class="fas fa-comment"></i></button>
+                <button onclick="switchSidebarTab('members')" id="btn-members" aria-label="Members Tab" role="tab" aria-selected="false"><i class="fas fa-users"></i></button>
+                <button onclick="switchSidebarTab('polls')" id="btn-polls" aria-label="Polls and Quizzes Tab" role="tab" aria-selected="false"><i class="fas fa-poll"></i></button>
+             <button onclick="switchSidebarTab('apps')" id="btn-apps" aria-label="Applications Tab" role="tab" aria-selected="false"><i class="fas fa-th-large"></i></button>
+                <button onclick="switchSidebarTab('cabinet')" id="btn-cabinet" aria-label="Resource Cabinet Tab" title="Resource Cabinet" role="tab" aria-selected="false"><i class="fas fa-archive"></i></button>
+            </div>
+
+            <!-- Chat Tab -->
+            <div id="tab-chat" class="tab-content active-tab">
+                <div id="chatBox"></div>
+                <div id="replyPreview" style="display:none; background:#111; border-left:2px solid var(--accent); padding:12px; margin-bottom:15px; position:relative; border-radius:2px;">
+                    <i class="fas fa-times" onclick="cancelReply()" style="position:absolute; right:12px; top:12px; cursor:pointer; color:#666;"></i>
+                    <div id="replySender" style="color:var(--accent); font-size:0.8rem; margin-bottom:5px; font-weight:600;"></div>
+                    <div id="replyText" style="color: #888; font-size:0.8rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></div>
+                </div>
+                <div class="chat-input-area">
+                    <input type="text" id="msgInput" placeholder="Draft message...">
+                    <button id="sendBtn" class="btn" style="border-radius: 2px; padding: 0 15px;"><i class="fas fa-paper-plane"></i></button>
+                </div>
+            </div>
+
+            <!-- Members Tab -->
+            <div id="tab-members" class="tab-content">
+                <div id="hostBreakoutControls" style="display:none; margin-bottom:25px; padding-bottom:20px; border-bottom:1px solid var(--border-color);">
+                    <p style="color:var(--accent); font-size:0.8rem; margin-bottom: 10px; letter-spacing:2px; text-transform:uppercase;">Partition Space</p>
+                    <div style="display:flex; gap:10px;">
+                        <input type="number" id="breakoutCount" value="2" style="width:70px; padding:10px; background:#050505; color:white; border: 1px solid #333; border-radius: 2px; text-align:center;"> 
+                        <button class="btn" style="flex:1; font-size:0.8rem;" onclick="sendBreakout()">Execute Split</button>
+                    </div>
+                </div>
+                <p style="color:#666; font-size:0.7rem; letter-spacing:2px; text-transform:uppercase; margin-bottom:15px;">Active Participants</p>
+
+<!-- HOST CONTROLS PANEL -->
+                    <div id="hostControlsPanel" style="display:none; margin-bottom: 15px; padding: 12px; background: #1a0505; border: 1px solid #ff4444; border-radius: 4px;">
+                        <p class="serif-text" style="color:#ff4444; font-weight:bold; margin-bottom:10px; font-size:0.9rem; text-transform:uppercase;"><i class="fas fa-shield-alt"></i> Host Controls</p>
+                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                            <button class="btn-secondary" style="font-size:0.75rem; padding: 8px;" onclick="hostAction('force-mute')"><i class="fas fa-microphone-slash"></i> Mute All</button>
+                            <button class="btn-secondary" style="font-size:0.75rem; padding: 8px;" onclick="hostAction('force-cam-off')"><i class="fas fa-video-slash"></i> Cams Off</button>
+                        </div>
+                    </div>
+                <div id="membersList"></div>
+            </div>
+
+            <!-- Polls & Quiz Tab -->
+            <div id="tab-polls" class="tab-content">
+                <div id="hostPollControls" style="display:none; background:#0a0a0a; padding:20px; border-radius:2px; border:1px solid var(--border-color); margin-bottom:25px;">
+                    <p class="serif-text" style="color:var(--accent); font-weight:bold; margin-bottom:15px; font-size:1.2rem; letter-spacing:1px;">Instant Inquiry</p>
+                    <input type="text" id="pollQ" placeholder="Inquiry Text" style="width:100%; margin-bottom:10px; padding:12px; background:#050505; color:white; border:1px solid #333; border-radius: 2px; outline:none;">
+                    <input type="text" id="pollO1" placeholder="Choice Alpha" style="width:100%; margin-bottom:10px; padding:12px; background:#050505; color:white; border:1px solid #333; border-radius: 2px; outline:none;">
+                    <input type="text" id="pollO2" placeholder="Choice Beta" style="width:100%; margin-bottom:15px; padding:12px; background:#050505; color:white; border:1px solid #333; border-radius: 2px; outline:none;">
+                    <button class="btn" style="width:100%; font-size:0.8rem;" onclick="launchPoll()">Commence Inquiry</button>
+                    
+                    <div style="width:100%; height:1px; background:var(--border-color); margin: 25px 0;"></div>
+                    
+                    <p class="serif-text" style="color:#ff4444; font-weight:bold; margin-bottom:15px; font-size:1.2rem; letter-spacing:1px;">Live Quiz Builder</p>
+                    <input type="text" id="quizQ" placeholder="Enter your question here..." style="width:100%; margin-bottom:10px; padding:12px; background:#050505; color:white; border:1px solid #333; border-radius: 2px; outline:none;">
+                    
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+                        <input type="text" id="quizO1" placeholder="Option 1" style="padding:12px; background:#050505; color:white; border:1px solid #333; border-radius: 2px; outline:none;">
+                        <input type="text" id="quizO2" placeholder="Option 2" style="padding:12px; background:#050505; color:white; border:1px solid #333; border-radius: 2px; outline:none;">
+                        <input type="text" id="quizO3" placeholder="Option 3" style="padding:12px; background:#050505; color:white; border:1px solid #333; border-radius: 2px; outline:none;">
+                        <input type="text" id="quizO4" placeholder="Option 4" style="padding:12px; background:#050505; color:white; border:1px solid #333; border-radius: 2px; outline:none;">
+                    </div>
+                    
+                    <select id="quizAnswer" style="width:100%; margin-bottom:15px; padding:12px; background:#050505; color:white; border:1px solid #333; border-radius: 2px; outline:none;">
+                        <option value="0">Correct Answer: Option 1</option>
+                        <option value="1">Correct Answer: Option 2</option>
+                        <option value="2">Correct Answer: Option 3</option>
+                        <option value="3">Correct Answer: Option 4</option>
+                    </select>
+                    
+                    <button class="btn-secondary" style="width:100%; font-size:0.8rem;" onclick="startBuiltQuiz()">Launch Quiz</button>
+
+                </div>
+                <p style="color:#666; font-size:0.7rem; letter-spacing:2px; text-transform:uppercase; margin-bottom:15px;">Active Inquiries</p>
+                <div id="activePollContainer"><p style="color:#444; font-size:0.85rem; font-style:italic;">No active inquiries.</p></div>
+            </div>
+
+           <!-- Resource Cabinet Tab -->
+            <div id="tab-cabinet" class="tab-content">
+               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid var(--border-color); padding-bottom:15px;">
+                    <p style="color:var(--accent); font-size:0.8rem; letter-spacing:2px; text-transform:uppercase; margin:0;"><i class="fas fa-archive"></i> Session Resources</p>
+                    <button class="btn" style="padding: 5px 10px; font-size: 0.65rem;" onclick="exportMeetingDigest()"><i class="fas fa-download"></i> Digest</button>
+                </div>
+                <div id="resourceCabinetList" style="display:flex; flex-direction:column; gap:10px;">
+                    <p style="color:#444; font-size:0.85rem; font-style:italic; text-align:center; margin-top:20px;">No resources shared yet.</p>
+                </div>
+            </div>
+
+            <!-- Apps & Tools Tab -->
+            <div id="tab-apps" class="tab-content">
+                <div class="apps-grid">
+                    <div class="app-item" onclick="switchMainStage('videoLayer')"><i class="fas fa-th-large"></i>Grid</div>
+                    <div class="app-item" onclick="switchMainStage('whiteboardLayer')"><i class="fas fa-pen-nib"></i>Canvas</div>
+                    <div class="app-item" onclick="switchMainStage('codeLayer')"><i class="fas fa-code"></i>Development</div>
+                    <div class="app-item" onclick="switchMainStage('markdownLayer')"><i class="fab fa-markdown"></i>Document</div>
+                    <div class="app-item" onclick="switchMainStage('gameLayer')"><i class="fas fa-chess-knight"></i>Recreation</div>
+                    
+                    <div class="app-item" onclick="openDirectYouTube()"><i class="fab fa-youtube"></i>YouTube</div>
+                    
+                    <div class="app-item" onclick="document.getElementById('fileUpload').click()"><i class="fas fa-folder-open"></i>Distribute</div>
+                                    </div>
+                
+                <div id="globalFileProgressWrapper" style="display:none; margin-top:25px; padding:15px; background:#0a0a0a; border:1px solid var(--border-color); border-radius:2px;">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                        <span id="transferFileName" style="color:#aaa; font-size:0.75rem; letter-spacing:1px; text-transform:uppercase;">File</span> 
+                        <span id="transferPct" style="color:var(--accent); font-weight:bold; font-size:0.75rem;">0%</span>
+                    </div>
+                    <div style="width:100%; height:4px; background:#111; border-radius:2px; overflow: hidden;">
+                        <div id="fileProgressFill" style="height:100%; background:var(--accent); width:0%; transition: width 0.1s;"></div>
+                    </div>
+                </div>
+                <input type="file" id="fileUpload" style="display:none;" onchange="handleChunkedFileUpload(event)">
+                
+                <div style="margin-top:25px; background:#0a0a0a; padding:20px; border-radius:2px; border:1px solid var(--border-color);">
+                    <div id="hostTimerControls" style="display:none; margin-bottom:25px; border-bottom:1px solid var(--border-color); padding-bottom:20px;">
+                        <p style="color:var(--accent); font-size:0.8rem; margin-bottom: 10px; letter-spacing:2px; text-transform:uppercase;">Chronometer</p>
+                        <div style="display:flex; gap:10px; margin-bottom: 15px;">
+                            <input type="number" id="timerMins" value="5" style="width:70px; padding:10px; background:#050505; color:white; border: 1px solid #333; border-radius: 2px; text-align:center; outline:none;"> 
+                            <button class="btn" style="flex:1; font-size:0.8rem;" onclick="startTimer()">Initiate</button>
+                        </div>
+                        <button class="btn-danger" style="width: 100%; font-size:0.8rem;" onclick="stopTimer()">Halt Chronometer</button>
+                    </div>
+                    
+                    <div id="hostMediaControls" style="display:none;">
+                        <p style="color:var(--accent); font-size:0.8rem; margin-bottom: 10px; letter-spacing:2px; text-transform:uppercase;">Custom Media Embeds</p>
+                        <input type="text" id="ytInput" placeholder="YouTube Video ID" style="width:100%; padding:12px; margin-bottom:10px; background:#050505; color:white; border: 1px solid #333; border-radius: 2px; outline:none; font-family:monospace;">
+                        <button class="btn" style="width:100%; margin-bottom:25px; font-size:0.8rem;" onclick="triggerYouTubeSync()">Broadcast YT Video</button>
+                        
+                        <input type="text" id="browserInput" placeholder="Website URL" style="width:100%; padding:12px; margin-bottom:10px; background:#050505; color:white; border: 1px solid #333; border-radius: 2px; outline:none; font-family:monospace;">
+                        <button class="btn-secondary" style="width:100%; font-size:0.8rem;" onclick="triggerWebBrowser()">Render Custom Webpage</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- Dedicated Social Hub View -->
+<div id="socialHubView" style="display: none; padding: 40px 20px; height: 100dvh; overflow-y: auto; background: #050505; position: absolute; top: 0; left: 0; width: 100%; z-index: 100; box-sizing: border-box;">
+    <div style="max-width: 900px; margin: 0 auto 20px auto; display: flex; justify-content: space-between; align-items: center;">
+        <h2 class="serif-text" style="color: var(--accent); letter-spacing: 2px;">Social Hub</h2>
+        <button class="btn-secondary" onclick="closeSocialHub()"><i class="fas fa-arrow-left"></i> Back to Lobby</button>
+    </div>
+    
+    <div class="social-hub-container">
+        <!-- Left Column: Search & Friends List -->
+        <div class="social-sidebar">
+            <h3 class="serif-text"><i class="fas fa-users"></i> Find & Follow</h3>
+            <div class="social-search-box">
+                <input type="text" id="userSearchInput" placeholder="Search by exact name...">
+                <button class="btn" onclick="searchUsers()"><i class="fas fa-search"></i></button>
+            </div>
+            <div id="searchResults" class="social-list"></div>
+
+            <h3 class="serif-text"><i class="fas fa-user-friends"></i> Mutual Friends</h3>
+            <div id="friendsList" class="social-list friends-scroll" style="max-height: 25vh; overflow-y: auto;">
+                <p class="empty-state">No mutual friends yet.</p>
+            </div>
+
+            <h3 class="serif-text" style="margin-top:20px;"><i class="fas fa-arrow-right"></i> Following</h3>
+            <div id="followingList" class="social-list" style="max-height: 20vh; overflow-y: auto;">
+                <p class="empty-state">You are not following anyone.</p>
+            </div>
+
+            <h3 class="serif-text" style="margin-top:20px;"><i class="fas fa-bell"></i> Inbox / Requests</h3>
+            <div id="messageRequestsList" class="social-list requests-scroll" style="max-height: 25vh; overflow-y: auto;">
+                <p class="empty-state">No pending requests.</p>
+            </div>
+        </div>
+
+        <!-- Right Column: Home Screen Direct Chat -->
+        <div id="directChatContainer" class="social-chat-panel">
+            <h3 id="directChatTitle" class="serif-text"><i class="fas fa-comments"></i> Direct Messages</h3>
+            <div id="directChatMessages" class="chat-messages-area">
+                <p class="empty-state" style="margin-top: auto; margin-bottom: auto; text-align: center; width: 100%;">Select a friend to start chatting.</p>
+            </div>
+            <div class="chat-input-area">
+                <input type="text" id="directMessageInput" placeholder="Type a message..." onkeypress="if(event.key === 'Enter') sendDirectMessage()">
+                <button class="btn" onclick="sendDirectMessage()"><i class="fas fa-paper-plane"></i></button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- Active Audio Call Widget -->
+<div id="activeAudioCallWidget" style="display:none; position: fixed; bottom: 30px; right: 30px; background: rgba(10,0,0,0.95); border: 1px solid #00ff66; padding: 15px 25px; border-radius: 8px; z-index: 10000; align-items: center; gap: 20px; box-shadow: 0 0 15px rgba(0, 255, 102, 0.2);">
+    <div style="display: flex; align-items: center; gap: 10px;">
+        <div style="width: 10px; height: 10px; background: #00ff66; border-radius: 50%; animation: pulse 1.5s infinite;"></div>
+        <h4 id="audioCallStatusText" style="color: #fff; margin: 0; font-size: 0.95rem;">Call in progress</h4>
+    </div>
+    <button class="btn-danger" style="padding: 6px 12px; font-size: 0.8rem;" onclick="endAudioCall()">End Call</button>
+    <audio id="remoteAudioStream" autoplay></audio>
+</div>
+<style>@keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }</style>
+
+<!-- Incoming Call Popup Modal -->
+<div id="incomingCallModal" style="display:none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.85); z-index: 9999; justify-content: center; align-items: center;">
+    <div style="background: #111; border: 2px solid var(--accent); padding: 30px; border-radius: 8px; text-align: center; max-width: 350px;">
+        <h3 id="callerNameText" style="color: #fff; margin-bottom: 10px;">Incoming Call...</h3>
+        <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">wants to start a voice call with you.</p>
+        <div style="display: flex; justify-content: center; gap: 15px;">
+            <button class="btn" onclick="acceptIncomingCall()">Accept</button>
+            <button class="btn-danger" style="padding: 10px 20px;" onclick="declineIncomingCall()">Decline</button>
+        </div>
+    </div>
+</div>
+<!-- Camera Request Modal -->
+<div id="camRequestModal" style="display:none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.85); z-index: 9999; justify-content: center; align-items: center;">
+    <div style="background: #111; border: 2px solid #3498db; padding: 30px; border-radius: 8px; text-align: center; max-width: 350px;">
+        <h3 style="color: #fff; margin-bottom: 10px;"><i class="fas fa-video" style="color:#3498db;"></i> Camera Request</h3>
+        <p style="color: #888; font-size: 0.85rem; margin-bottom: 20px;">The Host has requested you to turn on your camera.</p>
+        <div style="display: flex; justify-content: center; gap: 15px;">
+            <button class="btn" style="background:#3498db;" onclick="acceptCamRequest()">Allow</button>
+            <button class="btn-danger" style="padding: 10px 20px;" onclick="document.getElementById('camRequestModal').style.display='none'">Deny</button>
+        </div>
+    </div>
+</div>
+
+<!-- DETACHED REACTION BAR -->
+<div id="reactionBar" class="reaction-bar" style="display:none;">
+    <button class="reaction-btn" onclick="sendReaction('👍')">👍</button>
+    <button class="reaction-btn" onclick="sendReaction('❤️')">❤️</button>
+    <button class="reaction-btn" onclick="sendReaction('😂')">😂</button>
+    <button class="reaction-btn" onclick="sendReaction('🔥')">🔥</button>
+    <button class="reaction-btn" onclick="sendReaction('👏')">👏</button>
+    <button class="reaction-btn" onclick="sendReaction('🎉')">🎉</button>
+</div>
+
+
+    <!-- Admin Dashboard View -->
+    <div id="adminDashboardView" class="view-panel" style="display: none; position: fixed; top:0; left:0; width:100%; height:100%; background:#0a0a0a; z-index: 10000; padding: 40px; box-sizing:border-box; overflow-y:auto;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; max-width: 800px; margin-left: auto; margin-right: auto;">
+            <h2 class="serif-text" style="color: #ffaa00; margin:0;"><i class="fas fa-shield-alt"></i> Security & Admin Panel</h2>
+            <button class="btn" onclick="closeAdminDashboard()"><i class="fas fa-arrow-left"></i> Close Admin</button>
+        </div>
+        
+        <div style="background: rgba(20,20,20,0.9); border: 1px solid #333; border-radius: 12px; padding: 25px; max-width: 800px; margin-left: auto; margin-right: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+            <h3 style="color: #fff; margin-bottom: 20px; font-weight:400;"><i class="fas fa-users"></i> Registered Users Database</h3>
+            <div id="adminUserList" style="max-height: 60vh; overflow-y: auto; border: 1px solid #222; border-radius: 8px;">
+                <!-- Users will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
+
+
+
+
+
+
+
+
