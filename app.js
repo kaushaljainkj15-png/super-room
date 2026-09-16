@@ -277,8 +277,8 @@ function switchSidebarTab(t) {
 function switchMainStage(s) { 
     if(window.innerWidth <= 850) { const sidebar = document.querySelector('.sidebar'); const overlay = document.getElementById('mobileDrawerOverlay'); if(sidebar) sidebar.classList.remove('drawer-open'); if(overlay) overlay.classList.remove('active'); } 
     // MAGNET LOCK: Prevent guests from clicking Sidebar Apps if Magnet is ON
-    if (!isHost && window.isGuestMagnetized && s !== window.magnetizedStageId) {
-        alert("Magnet Mode is Active. The Host has locked navigation to the current app.");
+    if (!isHost && window.isGuestMagnetized && s !== 'magnetLayer' && s !== window.magnetizedStageId) {
+        alert("The Host is presenting. Your own work is saved - you'll be back on it when they finish.");
         return;
     }
 
@@ -306,8 +306,21 @@ function switchMainStage(s) {
         }
     } 
     
+    if (typeof updateActiveAppTile === 'function') updateActiveAppTile();
     if(s === 'whiteboardLayer') setTimeout(() => resizeCanvas(), 50); 
+    if(s === 'magnetLayer') setTimeout(() => { if (typeof resizeMagnetCanvas === 'function') resizeMagnetCanvas(); }, 50); 
+
+    // FIX: Magnet used to push the Host's screen ONCE, at the moment it was
+    // switched on. If the Host then moved to another app, every guest's mirror
+    // was left frozen on the old one. Now each stage change re-pushes while
+    // presenting, so the mirror tracks the Host the whole session.
+    if (isHost && window.magnetMode && typeof broadcastMagnetState === 'function') {
+        broadcastMagnetState();
+    }
     if(s === 'codeLayer' && typeof myCodeEditor !== 'undefined' && myCodeEditor) setTimeout(() => myCodeEditor.refresh(), 50); 
+
+    // Re-evaluate the interference shield every time the visible stage changes.
+    if (typeof refreshMagnetShield === 'function') refreshMagnetShield();
 }
 
 function logSystemMsg(text) { 
@@ -410,19 +423,139 @@ function toggleCustomFullscreen() {
         else if (document.msExitFullscreen) document.msExitFullscreen();
     }
 }
+// ==========================================
+// GUEST CONTROLS FOR THE MIRRORED (MAGNET) YOUTUBE PLAYER
+// These act on magnetYtPlayer and are deliberately LOCAL-ONLY: volume, captions
+// and fullscreen change nothing for anyone else, so a guest can make the Host's
+// presentation watchable without being able to pause or seek it.
+// ==========================================
+window.isMagnetCCActive = false;
+
+// FIX: captions never toggled because YouTube exposes the module under two
+// different names - 'captions' on the legacy AS3 player and 'cc' on the HTML5
+// one - and which you get varies by video and platform. Only 'captions' was
+// tried, so on the HTML5 player the call silently did nothing. Try both, and
+// tell the user plainly when a video genuinely carries no caption track rather
+// than leaving a dead-looking button.
+function magnetToggleCC() {
+    ensureMagnetAudioActive();  // captions and volume both need a live, unmuted player
+    if (!magnetYtPlayer || typeof magnetYtPlayer.loadModule !== 'function') {
+        logSystemMsg("Captions aren't available yet - give the video a moment to load.");
+        return;
+    }
+    const modules = ['captions', 'cc'];
+    try {
+        if (!window.isMagnetCCActive) {
+            modules.forEach(m => {
+                try {
+                    magnetYtPlayer.loadModule(m);
+                    magnetYtPlayer.setOption(m, 'track', { languageCode: 'en' });
+                } catch (e) { /* this player doesn't use that module name */ }
+            });
+            window.isMagnetCCActive = true;
+            // If neither module produced a track list, the video simply has no captions.
+            setTimeout(() => {
+                let tracks = null;
+                modules.forEach(m => {
+                    try { tracks = tracks || magnetYtPlayer.getOption(m, 'tracklist'); } catch (e) {}
+                });
+                if (!tracks || !tracks.length) {
+                    logSystemMsg("This video doesn't have captions available.");
+                    window.isMagnetCCActive = false;
+                }
+            }, 700);
+        } else {
+            modules.forEach(m => { try { magnetYtPlayer.setOption(m, 'track', {}); } catch (e) {} });
+            window.isMagnetCCActive = false;
+        }
+    } catch (err) {
+        console.warn('Captions unavailable for this video:', err);
+        logSystemMsg("Captions aren't available for this video.");
+    }
+}
+
+function magnetToggleVolume() {
+    if (!magnetYtPlayer || typeof magnetYtPlayer.isMuted !== 'function') return;
+    const btn = document.getElementById('magnetVolBtn');
+    const slider = document.getElementById('magnetVolSlider');
+    if (magnetYtPlayer.isMuted()) {
+        magnetYtPlayer.unMute();
+        const v = magnetYtPlayer.getVolume ? magnetYtPlayer.getVolume() : 100;
+        if (slider) slider.value = v;
+        if (btn) btn.innerHTML = '<i class="fas fa-volume-up"></i>';
+    } else {
+        magnetYtPlayer.mute();
+        if (btn) btn.innerHTML = '<i class="fas fa-volume-mute"></i>';
+    }
+}
+
+// MOBILE VOLUME KEYS: a phone's physical volume buttons only control *media*
+// volume once an unmuted media element is actually producing sound - while the
+// player is muted they adjust the ringer instead, which is why they appeared to
+// do nothing. Unmuting on the guest's first interaction hands the keys back.
+function ensureMagnetAudioActive() {
+    if (!magnetYtPlayer || typeof magnetYtPlayer.unMute !== 'function') return;
+    try {
+        if (magnetYtPlayer.isMuted && magnetYtPlayer.isMuted()) {
+            magnetYtPlayer.unMute();
+            magnetYtPlayer.setVolume(100);
+            const btn = document.getElementById('magnetVolBtn');
+            if (btn) btn.innerHTML = '<i class="fas fa-volume-up"></i>';
+            const sl = document.getElementById('magnetVolSlider');
+            if (sl) sl.value = 100;
+        }
+    } catch (e) {}
+}
+
+function magnetSetVolume(v) {
+    if (!magnetYtPlayer || typeof magnetYtPlayer.setVolume !== 'function') return;
+    const val = parseInt(v, 10);
+    magnetYtPlayer.setVolume(val);
+    const btn = document.getElementById('magnetVolBtn');
+    if (val > 0 && magnetYtPlayer.isMuted && magnetYtPlayer.isMuted()) magnetYtPlayer.unMute();
+    if (btn) btn.innerHTML = val === 0 ? '<i class="fas fa-volume-mute"></i>' : '<i class="fas fa-volume-up"></i>';
+}
+
+function magnetToggleFullscreen() {
+    const el = document.getElementById('magnetVideoWrap');
+    if (!el) return;
+    if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+        if (el.requestFullscreen) el.requestFullscreen();
+        else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+        // iOS Safari won't fullscreen a div; fall back to the iframe's own API.
+        else { const f = el.querySelector('iframe'); if (f && f.webkitEnterFullscreen) f.webkitEnterFullscreen(); }
+    } else {
+        if (document.exitFullscreen) document.exitFullscreen();
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+    }
+}
+
 // --- CUSTOM GUEST CONTROLS (Magnet Mode) ---
 window.isCustomCCActive = false;
 
+// Same two-module-name fix as magnetToggleCC - the HTML5 player calls it 'cc'.
 window.toggleCustomCC = function() {
-    if (typeof ytPlayer !== 'undefined' && ytPlayer.loadModule) {
-        if (!window.isCustomCCActive) {
-            ytPlayer.loadModule("captions");
-            ytPlayer.setOption("captions", "track", {"languageCode": "en"});
-            window.isCustomCCActive = true;
-        } else {
-            ytPlayer.unloadModule("captions");
-            window.isCustomCCActive = false;
-        }
+    if (typeof ytPlayer === 'undefined' || !ytPlayer || typeof ytPlayer.loadModule !== 'function') {
+        logSystemMsg("Captions aren't available yet - give the video a moment to load.");
+        return;
+    }
+    const modules = ['captions', 'cc'];
+    if (!window.isCustomCCActive) {
+        modules.forEach(m => {
+            try { ytPlayer.loadModule(m); ytPlayer.setOption(m, 'track', { languageCode: 'en' }); } catch (e) {}
+        });
+        window.isCustomCCActive = true;
+        setTimeout(() => {
+            let tracks = null;
+            modules.forEach(m => { try { tracks = tracks || ytPlayer.getOption(m, 'tracklist'); } catch (e) {} });
+            if (!tracks || !tracks.length) {
+                logSystemMsg("This video doesn't have captions available.");
+                window.isCustomCCActive = false;
+            }
+        }, 700);
+    } else {
+        modules.forEach(m => { try { ytPlayer.unloadModule(m); } catch (e) {} });
+        window.isCustomCCActive = false;
     }
 };
 
@@ -441,10 +574,9 @@ window.toggleCustomVolume = function() {
 // --- YOUTUBE MASTER SYNC ENGINE ---
 // The Host fires a unified Master Sync pulse every 1 second.
 setInterval(() => {
-    // FIX: YouTube playback is always a single shared room screen - there's no such
-    // thing as an "independent" guest video - so it should always stay in sync,
-    // not just when the separate Magnet Mode (navigation-lock) feature is on.
-    if (isHost && currentYtVideoId && typeof ytPlayer !== 'undefined' && typeof ytPlayer.getCurrentTime === 'function') {
+    // Everyone's YouTube is independent, so the Host only pulses while actually
+    // presenting via Magnet Mode - otherwise their private viewing would leak out.
+    if (isHost && window.magnetMode && currentYtVideoId && typeof ytPlayer !== 'undefined' && typeof ytPlayer.getCurrentTime === 'function') {
         const actualState = ytPlayer.getPlayerState();
         if (actualState === 1 || actualState === 2 || actualState === 3) {
             broadcastData({
@@ -546,6 +678,72 @@ function getSafeStream() {
 
 
 // Simplified setupCallEvents: always create a fresh video wrapper for incoming streams
+// ==========================================
+// REMOTE AUDIO SINK
+// Every remote stream used to be heard only through its <video> tile inside
+// #videoLayer. The moment you switched to any other app - screen share,
+// whiteboard, YouTube - that layer is display:none'd, and mobile browsers
+// (iOS Safari especially) suspend media inside a hidden subtree. That is why
+// voices went silent during screen share and why phones often heard nobody at
+// all. Audio now lives in its own always-present sink that is never hidden, so
+// it keeps playing no matter which stage is on screen.
+// ==========================================
+function getAudioSink() {
+    let sink = document.getElementById('remoteAudioSink');
+    if (!sink) {
+        sink = document.createElement('div');
+        sink.id = 'remoteAudioSink';
+        // Not display:none - that is precisely what suspends playback. Kept
+        // visually out of the way but technically rendered.
+        sink.style.cssText = 'position:fixed; width:1px; height:1px; bottom:0; left:0; opacity:0.01; pointer-events:none; overflow:hidden; z-index:-1;';
+        document.body.appendChild(sink);
+    }
+    return sink;
+}
+
+window.pendingAudioUnlock = [];
+
+function attachRemoteAudio(peerId, stream) {
+    if (!stream || !stream.getAudioTracks || !stream.getAudioTracks().length) return;
+    const sink = getAudioSink();
+    const id = 'remote-audio-' + peerId;
+    let a = document.getElementById(id);
+    if (!a) {
+        a = document.createElement('audio');
+        a.id = id;
+        a.autoplay = true;
+        a.setAttribute('playsinline', 'true');
+        sink.appendChild(a);
+    }
+    // Audio-only stream so the video tile isn't decoding the track twice.
+    const audioOnly = new MediaStream(stream.getAudioTracks());
+    a.srcObject = audioOnly;
+    a.muted = false;
+    a.volume = 1.0;
+    a.play().catch(() => {
+        // Browsers block un-gestured playback; queue it for the next real tap.
+        if (!window.pendingAudioUnlock.includes(a)) window.pendingAudioUnlock.push(a);
+    });
+}
+
+function detachRemoteAudio(peerId) {
+    const a = document.getElementById('remote-audio-' + peerId);
+    if (a) { a.srcObject = null; a.remove(); }
+}
+
+// iOS/Android will not start audio without a user gesture. Retry every queued
+// element on the first real interaction, and resume the WebAudio context that
+// the voice-activity visualiser uses.
+function unlockAudioPlayback() {
+    (window.pendingAudioUnlock || []).forEach(a => a.play().catch(() => {}));
+    window.pendingAudioUnlock = [];
+    document.querySelectorAll('#remoteAudioSink audio').forEach(a => a.play().catch(() => {}));
+    if (window.sharedAudioCtx && window.sharedAudioCtx.state === 'suspended') window.sharedAudioCtx.resume().catch(() => {});
+}
+['touchend', 'click', 'keydown'].forEach(evt =>
+    document.addEventListener(evt, unlockAudioPlayback, { passive: true })
+);
+
 window.setupCallEvents = function(call) {
     call.on('stream', rs => {
         const wid = 'wrapper-' + call.peer;
@@ -562,14 +760,21 @@ window.setupCallEvents = function(call) {
         v.playsInline = true;
         v.setAttribute('playsinline', 'true');
         v.srcObject = rs;
+        // The tile is muted: its audio is handled by the always-present sink so it
+        // survives stage switches. Muting here also prevents hearing each peer twice.
+        v.muted = true;
         v.onloadedmetadata = () => v.play().catch(e => console.warn('Autoplay blocked:', e));
         w.appendChild(v);
+        attachRemoteAudio(call.peer, rs);
         // Name tag
         const nameTag = document.createElement('div');
         nameTag.className = 'video-name-tag';
         nameTag.id = 'name-' + call.peer;
         const member = roomMembers.find(m => m.id === call.peer);
-        nameTag.innerText = member ? member.name : (call.peer === currentRoomHostId ? 'Host' : 'Guest');
+        // Mark the Host explicitly so it's obvious who is running the room.
+        const isTheHost = (member && member.isHost) || call.peer === currentRoomHostId;
+        const baseName = member ? member.name : (isTheHost ? 'Host' : 'Guest');
+        nameTag.innerText = isTheHost ? baseName + ' (Host)' : baseName;
         w.appendChild(nameTag);
         // Spotlight button
         const spotlightBtn = document.createElement('button');
@@ -589,6 +794,7 @@ window.setupCallEvents = function(call) {
         if (deadVideoElement) {
             if (typeof activeVisualizers !== 'undefined' && activeVisualizers[deadWrapperId]) cancelAnimationFrame(activeVisualizers[deadWrapperId]);
             deadVideoElement.remove();
+            detachRemoteAudio(call.peer);   // don't leak a dead <audio> per departure
         }
         if (typeof roomMembers !== 'undefined') {
             roomMembers = roomMembers.filter(m => m.id !== call.peer);
@@ -675,8 +881,6 @@ async function initCameraMic() {
         localStream.getVideoTracks().forEach(t => t.enabled = false);
 
         document.getElementById('wrapper-local').classList.add('video-off');
-        const overlay = document.getElementById('mediaBlockOverlay');
-        if (overlay) overlay.remove();
         
         const micBtn = document.getElementById('micBtn');
         const camBtn = document.getElementById('camBtn');
@@ -701,17 +905,11 @@ async function initCameraMic() {
         
         const localVidBox = document.getElementById('wrapper-local');
         if (localVidBox) {
-            let errorOverlay = document.getElementById('mediaBlockOverlay');
-            if (!errorOverlay) {
-                errorOverlay = document.createElement('div');
-                errorOverlay.id = 'mediaBlockOverlay';
-                errorOverlay.style.cssText = 'position:absolute; top:0; left:0; right:0; bottom:0; display:flex; height:100%; width:100%; align-items:center; justify-content:center; color:#666; flex-direction:column; text-align:center; padding:20px; box-sizing:border-box; background:#050505; z-index:5;';
-                localVidBox.appendChild(errorOverlay);
-            }
-            errorOverlay.innerHTML = `
-                <i class="fas fa-video-slash" style="font-size:2rem; margin-bottom:10px; color:#ff4444;"></i>
-                <span style="font-size:0.8rem; text-transform:uppercase; letter-spacing:1px;">Media Blocked</span>
-            `;
+            localVidBox.innerHTML = `
+                <div style="display:flex; height:100%; width:100%; align-items:center; justify-content:center; color:#666; flex-direction:column; text-align:center; padding:20px; box-sizing:border-box;">
+                    <i class="fas fa-video-slash" style="font-size:2rem; margin-bottom:10px; color:#ff4444;"></i>
+                    <span style="font-size:0.8rem; text-transform:uppercase; letter-spacing:1px;">Media Blocked</span>
+                </div>`;
         }
     }
 }
@@ -913,6 +1111,8 @@ async function hostRoom() {
    isHost = true; 
     window.magnetMode = false;
     window.isGuestMagnetized = false;
+    window.myEditPermissions = {};
+    window.pendingEditRequests = {};
     if (document.getElementById('ytGuestShield')) document.getElementById('ytGuestShield').style.display = 'none';
     if (document.getElementById('ytGuestShield')) document.getElementById('ytGuestShield').style.display = 'none';
     
@@ -920,6 +1120,12 @@ async function hostRoom() {
     if (document.getElementById('hostPollControls')) document.getElementById('hostPollControls').style.display = 'block'; 
     if (document.getElementById('hostBreakoutControls')) document.getElementById('hostBreakoutControls').style.display = 'block';
     if (document.getElementById('hostControlsPanel')) document.getElementById('hostControlsPanel').style.display = 'block';
+    // The Host Screen app only exists to watch the HOST's own presentation -
+    // pointless for the Host to open, so it's hidden only on their own screen.
+    if (document.getElementById('magnetAppTile')) document.getElementById('magnetAppTile').style.display = 'none';
+    // Host-only: deliberately push a file to the whole room (and file it in the
+    // Resource Cabinet), separate from just privately opening one to look at.
+    if (document.getElementById('hostShareTile')) document.getElementById('hostShareTile').style.display = '';
     if (document.getElementById('forceSyncBtn')) document.getElementById('forceSyncBtn').style.display = 'inline-block';
     if (document.getElementById('hostMediaControls')) document.getElementById('hostMediaControls').style.display = 'block';
 
@@ -1092,6 +1298,7 @@ async function joinRoom() {
   isHost = false; 
     window.magnetMode = false;
     window.isGuestMagnetized = false;
+    window.myEditPermissions = {};
     if (document.getElementById('ytGuestShield')) document.getElementById('ytGuestShield').style.display = 'none';
         
     // 2. GET CAMERA/MIC (user just clicked "Join Room" = user gesture = iOS allows getUserMedia)
@@ -1165,11 +1372,27 @@ function handlePeerCalls() {
         if(call.metadata && call.metadata.isScreenShare) { 
             call.answer(); 
             call.on('stream', s => { 
+                // Feed the same live stream to both the full-screen view AND the
+                // Host Screen mirror - only one of the two is visible at a time.
                 document.getElementById('sharedScreenVideo').srcObject = s; 
-                switchMainStage('screenLayer'); 
+                const magnetScreenVideo = document.getElementById('magnetScreenVideo');
+                if (magnetScreenVideo) magnetScreenVideo.srcObject = s;
+
+                // A guest who is locked into Magnet Mode gets the screen share
+                // routed into their Host Screen app instead of being yanked off
+                // whatever they were doing (development, document, etc).
+                if (!isHost && window.isGuestMagnetized) {
+                    window.magnetizedStageId = 'screenLayer';
+                    if (typeof updateMagnetView === 'function') updateMagnetView('screenLayer');
+                    switchMainStage('magnetLayer');
+                } else {
+                    switchMainStage('screenLayer'); 
+                }
             });
             call.on('close', () => {
                 document.getElementById('sharedScreenVideo').srcObject = null;
+                const magnetScreenVideo = document.getElementById('magnetScreenVideo');
+                if (magnetScreenVideo) magnetScreenVideo.srcObject = null;
                 if (currentActiveStage === 'screenLayer') switchMainStage('videoLayer');
             });
             return; 
@@ -1205,6 +1428,12 @@ function leaveRoom() {
     if (document.getElementById('hostControlsPanel')) document.getElementById('hostControlsPanel').style.display = 'none';
     if (document.getElementById('forceSyncBtn')) document.getElementById('forceSyncBtn').style.display = 'none';
     if (document.getElementById('hostMediaControls')) document.getElementById('hostMediaControls').style.display = 'none';
+
+    // Clear any leftover interference-shield state and pending edit-access requests
+    window.myEditPermissions = {};
+    window.pendingEditRequests = {};
+    const toastStack = document.getElementById('editRequestToastStack');
+    if (toastStack) toastStack.innerHTML = '';
 
     // Kill Audio Visualizers
     if (typeof activeVisualizers !== 'undefined') {
@@ -1302,7 +1531,7 @@ function leaveRoom() {
     currentYtVideoId = null; 
     
     // Wipe Video Grid
-    document.getElementById('videoLayer').innerHTML = `<div id="wrapper-local" class="video-wrapper video-off"><video id="localVideo" autoplay muted playsinline></video><div class="video-avatar"><div class="voice-pulse pulse-anim"><i class="fas fa-microphone"></i></div></div></div>`; 
+    document.getElementById('videoLayer').innerHTML = `<div id="wrapper-local" class="video-wrapper video-off"><video id="localVideo" autoplay muted playsinline></video><div class="video-avatar"><div class="voice-pulse pulse-anim"><i class="fas fa-microphone"></i></div></div><div class="video-name-tag" id="name-local">You</div></div>`; 
     
     if (document.getElementById('uiShortId')) document.getElementById('uiShortId').innerText = "---";
     if (document.getElementById('uiStatus')) document.getElementById('uiStatus').innerText = "Disconnected";
@@ -1478,6 +1707,23 @@ async function switchCamera() {
 }
 window.switchCamera = switchCamera;
 
+// Fullscreen the shared screen. Works for the Host and every guest. iOS Safari
+// refuses fullscreen on a <div>, so fall back to the video element's own
+// webkitEnterFullscreen, which it does support.
+function toggleScreenShareFullscreen() {
+    const box = document.getElementById('screenShareBox');
+    const vid = document.getElementById('sharedScreenVideo');
+    const inFs = document.fullscreenElement || document.webkitFullscreenElement;
+    if (!inFs) {
+        if (box && box.requestFullscreen) box.requestFullscreen().catch(() => {});
+        else if (box && box.webkitRequestFullscreen) box.webkitRequestFullscreen();
+        else if (vid && vid.webkitEnterFullscreen) vid.webkitEnterFullscreen();
+    } else {
+        if (document.exitFullscreen) document.exitFullscreen();
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+    }
+}
+
 function stopScreenShare() {
     const btn = document.getElementById('screenBtn');
     if (btn) btn.classList.remove('active');
@@ -1496,6 +1742,8 @@ function stopScreenShare() {
     // Clear DOM Memory
     const screenVideo = document.getElementById('sharedScreenVideo');
     if (screenVideo) screenVideo.srcObject = null;
+    const magnetScreenVideo = document.getElementById('magnetScreenVideo');
+    if (magnetScreenVideo) magnetScreenVideo.srcObject = null;
     
     // Restore layout
     if (currentActiveStage === 'screenLayer') switchMainStage('videoLayer');
@@ -1699,8 +1947,22 @@ const dataChannelHandlers = {
     'magnet-off': (msg, conn) => {
         if (!isHost) {
             window.isGuestMagnetized = false;
+            window.magnetizedStageId = null;
+            // Edit access is granted per presentation session - the next time
+            // the Host presents, guests start locked again and have to ask.
+            window.myEditPermissions = {};
             if (document.getElementById('ytGuestShield')) document.getElementById('ytGuestShield').style.display = 'none';
-            logSystemMsg("MAGNET OFF: You can now navigate freely.");
+            // Stop the mirrored video so it isn't left playing audio in the background.
+            if (magnetYtPlayer && typeof magnetYtPlayer.stopVideo === 'function') magnetYtPlayer.stopVideo();
+            updateMagnetView(null);
+            // Send them back to their own work, which was preserved the whole time.
+            if (currentActiveStage === 'magnetLayer') switchMainStage('videoLayer');
+            // Grants are scoped to ONE presentation. Without this, access handed out
+            // during an earlier session would silently still be live the next time
+            // the Host presents.
+            window.myEditPermissions = {};
+            if (typeof refreshMagnetShield === 'function') refreshMagnetShield();
+            logSystemMsg("MAGNET OFF: The Host stopped presenting.");
         }
     },
 
@@ -1711,47 +1973,53 @@ const dataChannelHandlers = {
         if (msg.magnetOn && !isHost) {
             window.isGuestMagnetized = true;
             window.magnetizedStageId = msg.stage;
-            if (msg.stage === 'youtubeLayer' && document.getElementById('ytGuestShield')) {
-                document.getElementById('ytGuestShield').style.display = 'block';
+            updateMagnetView(msg.stage);
+            if (isSharedStage(msg.stage)) {
+                // Games, distributed files, shared screens and web pages are one
+                // shared thing for the whole room already - open the real app.
+                switchMainStage(msg.stage);
+            } else {
+                // Whiteboard / YouTube / code / document hold the guest's OWN work,
+                // so the Host's version goes to the mirror instead of clobbering it.
+                switchMainStage('magnetLayer');
             }
+        } else if (msg.stage && isHost) {
+            switchMainStage(msg.stage);
         }
-        if (msg.stage) switchMainStage(msg.stage);
 
         if (msg.wbData) {
-            const img = new Image();
-            img.onload = () => {
-                if (typeof ctx !== 'undefined' && canvas) {
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
-                    ctx.drawImage(img, 0, 0);
+            if (shouldMirrorHostContent()) {
+                // Host's board goes on the mirror only - never over the guest's own board.
+                mirrorClear();
+                mirrorImage(msg.wbData);
+            } else {
+                const img = new Image();
+                img.onload = () => {
+                    if (typeof ctx !== 'undefined' && canvas) {
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        ctx.drawImage(img, 0, 0);
+                    }
+                };
+                img.src = msg.wbData;
+                if (msg.wbPage !== undefined) {
+                    currentWbPage = msg.wbPage;
+                    const pageUi = document.getElementById('wbPageIndicator');
+                    if (pageUi) pageUi.innerText = `Page ${currentWbPage + 1}`;
                 }
-            };
-            img.src = msg.wbData;
-            if (msg.wbPage !== undefined) {
-                currentWbPage = msg.wbPage;
-                const pageUi = document.getElementById('wbPageIndicator');
-                if (pageUi) pageUi.innerText = `Page ${currentWbPage + 1}`;
             }
         }
 
-        // Catch a late-joining/reconnecting guest up to the Host's current YouTube video + timestamp.
-        // (Single call now - this used to run through TWO separate, competing code paths that could
-        // both try to create/loadVideoById the player for the same message, racing each other.)
-        if (!isHost && msg.ytVid) {
-            currentYtVideoId = msg.ytVid;
+        // Catch a guest up to the Host's current video - but into the MIRROR player,
+        // and only while the Host is actually presenting. Their own video is untouched.
+        if (!isHost && msg.ytVid && msg.magnetOn) {
+            magnetYtVideoId = msg.ytVid;
             let targetTime = msg.ytTime || 0;
             if (msg.ytState === 1) targetTime += 1.0;
-            switchMainStage('youtubeLayer');
             createOrLoadYtVideo(msg.ytVid, {
                 startTime: targetTime,
                 muted: true,
-                autoplay: msg.ytState === 1 ? 1 : 0,
-                onReadyExtra: player => {
-                    if (msg.ytState === 1) {
-                        player.playVideo();
-                    } else if (msg.ytState === 2) {
-                        player.pauseVideo();
-                    }
-                }
+                target: 'magnet',
+                onReadyExtra: player => player.playVideo()
             });
         }
 
@@ -1765,10 +2033,15 @@ const dataChannelHandlers = {
 
     'chess-seat': (msg, conn) => applyChessSeat(msg.color, msg.peerId, msg.name),
     
+    'magnet-media': (msg, conn) => { if (shouldMirrorHostContent()) renderMagnetMedia(msg.dataUrl, msg.mime, msg.name); },
     'yt-load': (msg, conn) => {
-        currentYtVideoId = msg.vidId;
-        switchMainStage('youtubeLayer'); 
-        createOrLoadYtVideo(msg.vidId, { muted: true });
+        // Only lands while the Host is presenting, and only on the mirror player.
+        if (isHost || !window.isGuestMagnetized) return;
+        magnetYtVideoId = msg.vidId;
+        window.magnetizedStageId = 'youtubeLayer';
+        updateMagnetView('youtubeLayer');
+        switchMainStage('magnetLayer');
+        createOrLoadYtVideo(msg.vidId, { muted: true, target: 'magnet' });
     },
 
     'hand-toggle': (msg, conn) => {
@@ -1788,6 +2061,7 @@ const dataChannelHandlers = {
     'members-update': (msg, conn) => {
         roomMembers = msg.list; 
         updateMembersUI(); 
+        if (typeof refreshVideoNameTags === 'function') refreshVideoNameTags();
         
         // PRIORITY 1: GARBAGE COLLECT GHOST WRAPPERS
         // Find all video wrappers currently on screen
@@ -1914,16 +2188,93 @@ const dataChannelHandlers = {
     'reaction': (msg, conn) => showReactionUI(msg.peerId, msg.emoji),
     'cap': (msg, conn) => showCaption(msg.n, msg.t),
     'chat': (msg, conn) => renderChatMessage(msg.text, 'them', msg.senderName, msg.replyData),
-    'code-edit': (msg, conn) => { if(typeof myCodeEditor !== 'undefined' && myCodeEditor && myCodeEditor.getValue() !== msg.code) { const c = myCodeEditor.getCursor(); myCodeEditor.setValue(msg.code); myCodeEditor.setCursor(c); } },
-    'md-edit': (msg, conn) => { document.getElementById('mdInput').value = msg.text; renderMarkdown(); },
+    // Code and Document are a live shared space for the whole room already -
+    // every keystroke broadcasts to everyone regardless of Magnet Mode, same as
+    // before. Magnet just decides whether it FORCES a guest's screen to jump
+    // there; it was never meant to gate the editing itself.
+    // Receiving side of the same rule: an incoming edit only lands if I'm actually
+    // part of the Host's presentation right now. Otherwise my Development /
+    // Document is my own private scratch space and must not be overwritten.
+    // The Host's file goes to the READ-ONLY mirror in the Host Screen app, so the
+    // guest's own Development file is never touched. It only lands in their real
+    // editor once the Host has granted them edit access on this app.
+    'code-edit': (msg, conn) => {
+        if (!isHost && !window.isGuestMagnetized) return;
+        if (shouldMirrorHostContent() && !(window.myEditPermissions && window.myEditPermissions.codeLayer)) {
+            const m = document.getElementById('magnetCodeMirror');
+            if (m) m.textContent = msg.code || '';
+            // Mirror the Host's live preview too. srcdoc + sandbox="allow-scripts"
+            // (no allow-same-origin) means the Host's code runs isolated and can't
+            // reach this page's DOM, cookies or storage.
+            const pv = document.getElementById('magnetCodePreview');
+            if (pv) pv.srcdoc = msg.code || '';
+            const t = document.getElementById('magnetCodeTabName');
+            if (t && msg.tabName) t.textContent = msg.tabName;
+            return;
+        }
+        if(typeof myCodeEditor !== 'undefined' && myCodeEditor && myCodeEditor.getValue() !== msg.code) { const c = myCodeEditor.getCursor(); myCodeEditor.setValue(msg.code); myCodeEditor.setCursor(c); }
+    },
+    'md-edit': (msg, conn) => {
+        if (!isHost && !window.isGuestMagnetized) return;
+        if (shouldMirrorHostContent() && !(window.myEditPermissions && window.myEditPermissions.markdownLayer)) {
+            const src = document.getElementById('magnetDocSource');
+            if (src) src.textContent = msg.text || '';   // raw side, like the Host's left pane
+            const m = document.getElementById('magnetDocMirror');
+            if (m) m.innerHTML = (window.marked && window.DOMPurify) ? DOMPurify.sanitize(marked.parse(msg.text || '')) : '';
+            const t = document.getElementById('magnetDocTabName');
+            if (t && msg.tabName) t.textContent = msg.tabName;
+            return;
+        }
+        document.getElementById('mdInput').value = msg.text; renderMarkdown();
+    },
+
+    // A shielded guest asking to be let in on a specific app while Magnet is on.
+    'edit-request': (msg, conn) => {
+        if (!isHost) return;
+        if (!MAGNET_REQUESTABLE_STAGES.includes(msg.stage)) return;
+        const safeName = window.DOMPurify ? DOMPurify.sanitize(msg.name || 'A guest', { ALLOWED_TAGS: [] }) : (msg.name || 'A guest').replace(/[<>]/g, '');
+        const reqId = conn.peer + '::' + msg.stage;
+        window.pendingEditRequests[reqId] = { peerId: conn.peer, name: safeName, stage: msg.stage };
+        renderEditRequestToast(reqId);
+    },
+    // The Host's Allow/Deny answer landing back on the guest who asked.
+    'edit-grant': (msg, conn) => {
+        if (isHost) return;
+        window.myEditPermissions[msg.stage] = !!msg.allowed;
+        logSystemMsg(msg.allowed
+            ? `The Host granted you edit access to ${MAGNET_SHIELD_LABELS[msg.stage] || msg.stage}.`
+            : `The Host denied your request to edit ${MAGNET_SHIELD_LABELS[msg.stage] || msg.stage}.`);
+        // Granted on a mirrored app: move them off the read-only mirror onto the
+        // real editor, and seed it with the Host's current content so they're
+        // editing the same thing rather than their own stale file.
+        if (msg.allowed && (msg.stage === 'codeLayer' || msg.stage === 'markdownLayer')) {
+            if (msg.stage === 'codeLayer') {
+                const m = document.getElementById('magnetCodeMirror');
+                const seed = (typeof msg.code === 'string') ? msg.code : (m ? m.textContent : '');
+                if (typeof myCodeEditor !== 'undefined' && myCodeEditor) myCodeEditor.setValue(seed || '');
+            } else {
+                const mi = document.getElementById('mdInput');
+                if (mi && typeof msg.text === 'string') { mi.value = msg.text; renderMarkdown(); }
+            }
+            switchMainStage(msg.stage);
+        }
+        // Denied: put the button back so they can ask again later.
+        if (!msg.allowed) {
+            const b = document.getElementById('magnetEditRequestBtn');
+            if (b) { b.disabled = false; b.innerHTML = '<i class="fas fa-hand-paper"></i> Ask to Edit'; }
+        } else if (typeof hideMagnetEditRequestBtn === 'function') {
+            hideMagnetEditRequestBtn();
+        }
+        if (typeof refreshMagnetShield === 'function') refreshMagnetShield();
+    },
 
     // --- WHITEBOARD ---
-    'draw': (msg, conn) => handleIncomingDraw(msg),
-    'wb-clear': (msg, conn) => clearWhiteboard(false),
+    'draw': (msg, conn) => { if (shouldMirrorHostContent()) mirrorDraw(msg); else handleIncomingDraw(msg); },
+    'wb-clear': (msg, conn) => { if (shouldMirrorHostContent()) mirrorClear(); else clearWhiteboard(false); },
     'wb-bg': (msg, conn) => applyBoardBg(msg.color),
-    'wb-bg-img': (msg, conn) => { const i = new Image(); i.onload = () => ctx.drawImage(i, 0, 0); i.src = msg.data; },
-    'wb-page': (msg, conn) => { wbPages[msg.page] = msg.data; currentWbPage = msg.page; renderCurrentPage(); },
-    'wb-text': (msg, conn) => drawWbText(msg.text, msg.x, msg.y, false, msg.color, msg.font, msg.size),
+    'wb-bg-img': (msg, conn) => { if (shouldMirrorHostContent()) { mirrorImage(msg.data); return; } const i = new Image(); i.onload = () => ctx.drawImage(i, 0, 0); i.src = msg.data; },
+    'wb-page': (msg, conn) => { if (shouldMirrorHostContent()) { mirrorClear(); if (msg.data) mirrorImage(msg.data); return; } wbPages[msg.page] = msg.data; currentWbPage = msg.page; renderCurrentPage(); },
+    'wb-text': (msg, conn) => { if (shouldMirrorHostContent()) { mirrorText(msg.text, msg.x, msg.y, msg.color, msg.font, msg.size); return; } drawWbText(msg.text, msg.x, msg.y, false, msg.color, msg.font, msg.size); },
 
     // QUIZ, POLLS, FILES
     'quiz-start': (msg, conn) => { if (!isHost && conn.peer !== currentRoomHostId) return; switchSidebarTab('polls'); switchMainStage('quizLayer'); document.getElementById('quizDisplay').innerHTML = `<h1 class="serif-text" style="color:var(--accent); font-size:3rem; margin-bottom:20px;">Assessment Commencing</h1>`; },
@@ -1956,37 +2307,34 @@ const dataChannelHandlers = {
     'timer-stop': (msg, conn) => { clearInterval(timerInterval); document.getElementById('sharedTimerDisplay').style.display = 'none'; },
 
     // --- YT MASTER SYNC ---
-    'yt-master-sync': (msg, conn) => { if (!isHost && conn.peer !== currentRoomHostId) return;
-        // FIX: guests now always follow the Host's YouTube video (there's no independent
-        // guest playback anyway) instead of only when Magnet Mode happens to be on.
-        if (isHost || typeof ytPlayer === 'undefined' || typeof ytPlayer.getCurrentTime !== 'function') return;
-        let targetState = msg.state;
-        let targetVid = msg.vidId || currentYtVideoId;
-        let myTime = ytPlayer.getCurrentTime() || 0;
-        let myState = ytPlayer.getPlayerState();
+    'yt-master-sync': (msg, conn) => {
+        if (isHost || conn.peer !== currentRoomHostId) return;
+        // Drives the MIRROR player only. The guest's own video keeps playing
+        // exactly where they left it.
+        if (!window.isGuestMagnetized) return;
+        const p = magnetYtPlayer;
+        if (!p || typeof p.getCurrentTime !== 'function') return;
 
-        if (typeof currentYtVideoId !== 'undefined' && currentYtVideoId !== targetVid) {
-            currentYtVideoId = targetVid;
-            switchMainStage('youtubeLayer');
-            ytPlayer.mute(); window.guestNeedsUnmute = true;
-            ytPlayer.loadVideoById(targetVid, msg.time || 0);
-            return; 
+        const targetState = msg.state;
+        const targetVid = msg.vidId || magnetYtVideoId;
+        const myTime = p.getCurrentTime() || 0;
+        const myState = p.getPlayerState();
+
+        if (magnetYtVideoId !== targetVid) {
+            magnetYtVideoId = targetVid;
+            p.mute();
+            p.loadVideoById(targetVid, msg.time || 0);
+            return;
         }
-        if (myState === -1 || myState === 5) { ytPlayer.mute(); window.guestNeedsUnmute = true; ytPlayer.playVideo(); return; }
-        if (myState === 3) return; 
+        if (myState === -1 || myState === 5) { p.mute(); p.playVideo(); return; }
+        if (myState === 3) return;
 
-        if (targetState === 1) {
-            if (myState !== 1) ytPlayer.playVideo();
-            if (window.guestNeedsUnmute && myState === 1) {
-                setTimeout(() => { if (typeof ytPlayer.unMute === 'function') ytPlayer.unMute(); }, 200);
-                window.guestNeedsUnmute = false;
-            }
-        }
-        else if (targetState === 2 && myState !== 2) ytPlayer.pauseVideo();
-        else if (targetState === 3 && myState === 1) ytPlayer.pauseVideo();
+        if (targetState === 1 && myState !== 1) p.playVideo();
+        else if (targetState === 2 && myState !== 2) p.pauseVideo();
+        else if (targetState === 3 && myState === 1) p.pauseVideo();
 
-        if (targetState === 1 && Math.abs(myTime - msg.time) > 1.0) ytPlayer.seekTo(msg.time, true);
-        else if (targetState === 2 && Math.abs(myTime - msg.time) > 0.3) ytPlayer.seekTo(msg.time, true);
+        if (targetState === 1 && Math.abs(myTime - msg.time) > 1.0) p.seekTo(msg.time, true);
+        else if (targetState === 2 && Math.abs(myTime - msg.time) > 0.3) p.seekTo(msg.time, true);
     },
     'yt-play': (msg, conn) => dataChannelHandlers['yt-master-sync']({...msg, state: 1}, conn),
     'yt-pause': (msg, conn) => dataChannelHandlers['yt-master-sync']({...msg, state: 2}, conn),
@@ -1998,7 +2346,7 @@ const dataChannelHandlers = {
     'chess-reset': (msg, conn) => { resetChess(false); switchMainStage('gameLayer'); },
     'chess-reset': (msg, conn) => { resetChess(false); switchMainStage('gameLayer'); },
     'soundboard-play': (msg, conn) => { if(typeof playBoardSound === 'function') playBoardSound(msg.sound, false); },
-    'media': (msg, conn) => renderSharedMedia(msg.dataUrl, msg.mimeType, msg.fileName),
+    'media': (msg, conn) => renderSharedMedia(msg.dataUrl, msg.mimeType, msg.fileName, true),
     'iframe-load': (msg, conn) => loadSharedBrowser(msg.url, false)
 };
 
@@ -2271,39 +2619,125 @@ function muteMember(targetId) {
 // ==========================================
 window.magnetMode = false;
 
+// Pushes whatever the Host is currently showing into every guest's Host Screen
+// mirror. Called when Magnet is switched on AND whenever the Host changes app
+// while it stays on.
+function broadcastMagnetState() {
+    if (!isHost || !window.magnetMode) return;
+
+    let currentTime = 0, currentState = 1;
+    if (currentYtVideoId && typeof ytPlayer !== 'undefined' && typeof ytPlayer.getCurrentTime === 'function') {
+        currentTime = ytPlayer.getCurrentTime();
+        currentState = ytPlayer.getPlayerState();
+    }
+
+    broadcastData({
+        type: 'room-sync',
+        stage: currentActiveStage,
+        ytVid: currentYtVideoId,
+        ytTime: currentTime,
+        ytState: currentState,
+        magnetOn: true
+    });
+
+    // Send the board as an image so guests see everything already drawn, not
+    // just strokes made from this moment on.
+    if (currentActiveStage === 'whiteboardLayer' && typeof canvas !== 'undefined' && canvas.width > 0) {
+        broadcastData({ type: 'wb-bg-img', data: canvas.toDataURL('image/jpeg', 0.5) });
+    }
+    // Same idea for the editor and the document - send what's already written,
+    // not just keystrokes made from now on.
+    if (currentActiveStage === 'codeLayer' && typeof myCodeEditor !== 'undefined' && myCodeEditor) {
+        broadcastData({ type: 'code-edit', code: myCodeEditor.getValue(), tabName: currentTabName('codeLayer') });
+    }
+    if (currentActiveStage === 'markdownLayer') {
+        const mi = document.getElementById('mdInput');
+        if (mi) broadcastData({ type: 'md-edit', text: mi.value, tabName: currentTabName('markdownLayer') });
+    }
+    // A file opened privately (Open File) isn't broadcast on its own - push it
+    // now so guests' Host Screen mirror shows what's actually on screen.
+    if (currentActiveStage === 'mediaLayer' && window.currentPrivateMedia) {
+        broadcastData({
+            type: 'magnet-media',
+            dataUrl: window.currentPrivateMedia.dataUrl,
+            mime: window.currentPrivateMedia.mime,
+            name: window.currentPrivateMedia.name
+        });
+    }
+}
+
+// Always-visible reminder of whether anything is leaving this machine. Without
+// it there's no way to tell at a glance whether "Open File" is staying private
+// or being mirrored to the room, which is exactly the kind of thing you don't
+// want to be guessing about.
+// Names on tiles can arrive after the video does, so re-label whenever the
+// member list changes rather than only at stream time.
+function refreshVideoNameTags() {
+    document.querySelectorAll('.video-name-tag').forEach(tag => {
+        const peerId = tag.id.replace(/^name-/, '');
+        if (peerId === 'local') return;
+        const member = roomMembers.find(m => m.id === peerId);
+        const isTheHost = (member && member.isHost) || peerId === currentRoomHostId;
+        const baseName = member ? member.name : (isTheHost ? 'Host' : 'Guest');
+        tag.innerText = isTheHost ? baseName + ' (Host)' : baseName;
+    });
+    const localTag = document.getElementById('name-local');
+    if (localTag) localTag.innerText = (myDisplayName || 'You') + (isHost ? ' (Host)' : '') + ' (You)';
+}
+
+// Highlights whichever app tile is currently open, so it's obvious at a glance
+// what you're looking at - especially useful for a guest in Host Screen.
+function updateActiveAppTile() {
+    const map = {
+        videoLayer: 'Grid', whiteboardLayer: 'Canvas', codeLayer: 'Development',
+        markdownLayer: 'Document', gameLayer: 'Recreation', magnetLayer: 'Host Screen',
+        youtubeLayer: 'YouTube', mediaLayer: 'Open File', screenLayer: 'Screen',
+        browserLayer: 'Browser'
+    };
+    const wanted = map[currentActiveStage];
+    document.querySelectorAll('.app-item').forEach(el => {
+        const label = (el.textContent || '').trim().toLowerCase();
+        el.classList.toggle('app-item-active', !!wanted && label === wanted.toLowerCase());
+    });
+}
+
+function updatePresentingBadge() {
+    let b = document.getElementById('presentingBadge');
+    if (!isHost) { if (b) b.style.display = 'none'; return; }
+    if (!b) {
+        b = document.createElement('div');
+        b.id = 'presentingBadge';
+        // FIX: this sat top-centre, directly on top of the control dock and the
+        // editor's own header buttons. Moved to the bottom-left, which is empty
+        // on every stage, and left click-through so it can never block anything.
+        b.className = 'presenting-badge';
+        document.body.appendChild(b);
+    }
+    if (window.magnetMode) {
+        b.innerHTML = '<i class="fas fa-magnet"></i> Presenting - guests see this screen';
+        b.style.display = 'block';
+    } else {
+        b.style.display = 'none';
+    }
+}
+
 function forceSyncStage() {
     if (!isHost) return;
     window.magnetMode = !window.magnetMode; // Toggle ON/OFF
     
     if (window.magnetMode) {
-        let currentTime = 0, currentState = 1;
-        if (currentYtVideoId && typeof ytPlayer !== 'undefined' && typeof ytPlayer.getCurrentTime === 'function') {
-            currentTime = ytPlayer.getCurrentTime();
-            currentState = ytPlayer.getPlayerState();
-        }
-        
-       broadcastData({
-            type: 'room-sync',
-            stage: currentActiveStage,
-            ytVid: currentYtVideoId,
-            ytTime: currentTime,
-            ytState: currentState,
-            magnetOn: true
-        });
-        
-        // PRIORITY 30: Private Whiteboarding - Sync canvas image when Magnet Mode is enabled
-        if (currentActiveStage === 'whiteboardLayer' && typeof canvas !== 'undefined' && canvas.width > 0) {
-            broadcastData({type: 'wb-bg-img', data: canvas.toDataURL('image/jpeg', 0.5)});
-        }
-        
-        // Issue 1 Fix: `room-sync` instantly synchronizes the guests, no arbitrary delay needed.
+        broadcastMagnetState();
         
         if (typeof playBoardSound === 'function') playBoardSound('chime', false);
-        logSystemMsg("MAGNET ON: Guests locked to your screen.");
+        if (typeof updateMagnetView === 'function') updateMagnetView(currentActiveStage);
+        logSystemMsg("MAGNET ON: Guests now see your screen in their Host Screen app.");
+        updatePresentingBadge();
     } else {
         broadcastData({ type: 'magnet-off' });
         if (typeof playBoardSound === 'function') playBoardSound('chime', false);
-        logSystemMsg("MAGNET OFF: Guests can navigate freely.");
+        if (typeof updateMagnetView === 'function') updateMagnetView(null);
+        logSystemMsg("MAGNET OFF: Guests returned to their own work.");
+        updatePresentingBadge();
     }
 }
 
@@ -2733,7 +3167,7 @@ function resizeCanvas() {
         if(t) ctx.putImageData(t,0,0); 
     } 
 } 
-window.addEventListener('resize', resizeCanvas);
+window.addEventListener('resize', () => { resizeCanvas(); if (typeof resizeMagnetCanvas === 'function') resizeMagnetCanvas(); });
 
 // MOBILE FIX: chessboard.js reads the container's rendered width once at
 // creation time and does not auto-track later layout changes (e.g. phone
@@ -2748,9 +3182,6 @@ window.addEventListener('resize', () => {
 
 // PRIORITY 21: MOBILE TOUCH DRAWING & APPLE PENCIL SUPPORT
 // Upgraded from MouseEvents to PointerEvents so it works flawlessly on all touchscreens.
-canvas.addEventListener('touchstart', e => { if(currentWbTool !== 'none') e.preventDefault(); }, {passive: false});
-canvas.addEventListener('touchmove', e => { if(currentWbTool !== 'none') e.preventDefault(); }, {passive: false});
-
 canvas.onpointerdown = e => { 
     if(currentWbTool === 'none') return;
     
@@ -2776,8 +3207,8 @@ canvas.onpointerdown = e => {
         const color = document.getElementById('wbColorPicker').value;
         
         i.style.position = 'absolute'; 
-        i.style.left = (e.clientX - rect.left) + 'px'; 
-        i.style.top = (e.clientY - rect.top - (s*3)) + 'px'; 
+        i.style.left = e.offsetX + 'px'; 
+        i.style.top = (e.offsetY - (s*3)) + 'px'; 
         i.style.font = fontStr; 
         i.style.color = color; 
         i.style.background = 'transparent'; 
@@ -2980,28 +3411,204 @@ window.addEventListener('load', () => {
     
     const defaultCode = `<!DOCTYPE html>\n<html>\n<head>\n<style>\n  body { font-family: sans-serif; text-align: center; margin-top: 50px; }\n  h1 { color: #e60000; }\n</style>\n</head>\n<body>\n  <h1>Welcome to Development Studio</h1>\n  <p>Write HTML, CSS, and JavaScript here.</p>\n  <button onclick="alert('Working!')">Test JS</button>\n</body>\n</html>`;
     myCodeEditor.setValue(defaultCode);
+    initEditorTabs('codeLayer', defaultCode, 'index.html');
     
     myCodeEditor.on('change', (editor, change) => { 
-        if(change.origin !== 'setValue') { 
-            broadcastData({type: 'code-edit', code: editor.getValue()}); 
+        if(change.origin === 'setValue') return;
+        stashActiveTabContent('codeLayer');
+        if (mayBroadcastEdits('codeLayer')) { 
+            broadcastData({type: 'code-edit', code: editor.getValue(), tabName: currentTabName('codeLayer')}); 
         } 
     });
 });
 
+// ==========================================
+// WHO MAY BROADCAST EDITS
+// Development/Document were previously broadcasting EVERY keystroke to the whole
+// room unconditionally - which is why they stayed in lockstep even with Magnet
+// off and with nobody granted permission. They're now private scratch space by
+// default, exactly like the whiteboard and YouTube:
+//   - Host: only publishes while actually presenting (Magnet ON).
+//   - Guest: only publishes if the Host granted them edit access for that app.
+// ==========================================
+function mayBroadcastEdits(stageId) {
+    if (isHost) return !!window.magnetMode;
+    return !!(window.isGuestMagnetized && window.myEditPermissions && window.myEditPermissions[stageId]);
+}
+
+// ==========================================
+// EDITOR TABS (Development + Document)
+// Each participant keeps their own set of files entirely client-side. The cap
+// matters: every CodeMirror doc and every markdown string lives in memory, and
+// an unbounded "New tab" button is a trivial way to make a browser tab grind to
+// a halt or die - especially on a phone. 8 is generous for a working session
+// and cheap enough that a full room can't collectively exhaust anything.
+// ==========================================
+const MAX_EDITOR_TABS = 8;
+
+window.editorTabs = {
+    codeLayer: { files: [], active: 0, seq: 1 },
+    markdownLayer: { files: [], active: 0, seq: 1 }
+};
+
+function tabStateFor(stageId) { return window.editorTabs[stageId]; }
+
+function readEditorValue(stageId) {
+    if (stageId === 'codeLayer') return (typeof myCodeEditor !== 'undefined' && myCodeEditor) ? myCodeEditor.getValue() : '';
+    const mi = document.getElementById('mdInput');
+    return mi ? mi.value : '';
+}
+
+function writeEditorValue(stageId, text) {
+    if (stageId === 'codeLayer') {
+        if (typeof myCodeEditor !== 'undefined' && myCodeEditor) myCodeEditor.setValue(text || '');
+        return;
+    }
+    const mi = document.getElementById('mdInput');
+    if (mi) { mi.value = text || ''; if (typeof renderMarkdown === 'function') renderMarkdown(); }
+}
+
+function currentTabName(stageId) {
+    const st = tabStateFor(stageId);
+    const f = st && st.files[st.active];
+    return f ? f.name : '';
+}
+
+// Pushes the active file out, but only when the sharing rules allow it.
+function broadcastActiveTab(stageId) {
+    if (!mayBroadcastEdits(stageId)) return;
+    const text = readEditorValue(stageId);
+    if (stageId === 'codeLayer') broadcastData({ type: 'code-edit', code: text, tabName: currentTabName(stageId) });
+    else broadcastData({ type: 'md-edit', text: text, tabName: currentTabName(stageId) });
+}
+
+function renderEditorTabs(stageId) {
+    const barId = stageId === 'codeLayer' ? 'codeTabBar' : 'mdTabBar';
+    const bar = document.getElementById(barId);
+    const st = tabStateFor(stageId);
+    if (!bar || !st) return;
+    bar.innerHTML = '';
+
+    st.files.forEach((f, i) => {
+        const tab = document.createElement('div');
+        tab.className = 'editor-tab' + (i === st.active ? ' active' : '');
+
+        const label = document.createElement('span');
+        label.className = 'editor-tab-label';
+        label.textContent = f.name;              // textContent: filenames are user input
+        label.title = 'Click to open, double-click to rename';
+        label.onclick = () => switchEditorTab(stageId, i);
+        label.ondblclick = () => renameEditorTab(stageId, i);
+        tab.appendChild(label);
+
+        if (st.files.length > 1) {
+            const x = document.createElement('button');
+            x.className = 'editor-tab-close';
+            x.innerHTML = '&times;';
+            x.title = 'Close file';
+            x.onclick = e => { e.stopPropagation(); closeEditorTab(stageId, i); };
+            tab.appendChild(x);
+        }
+        bar.appendChild(tab);
+    });
+
+    const add = document.createElement('button');
+    add.className = 'editor-tab-add';
+    const atCap = st.files.length >= MAX_EDITOR_TABS;
+    add.innerHTML = atCap ? `<i class="fas fa-ban"></i> ${st.files.length}/${MAX_EDITOR_TABS}` : '<i class="fas fa-plus"></i> New';
+    add.disabled = atCap;
+    add.title = atCap ? `Tab limit reached (${MAX_EDITOR_TABS} per person)` : 'New file';
+    add.onclick = () => newEditorTab(stageId);
+    bar.appendChild(add);
+}
+
+function initEditorTabs(stageId, firstContent, firstName) {
+    const st = tabStateFor(stageId);
+    if (!st || st.files.length) return;
+    st.files.push({ name: firstName, content: firstContent || '' });
+    st.active = 0;
+    renderEditorTabs(stageId);
+}
+
+function switchEditorTab(stageId, index) {
+    const st = tabStateFor(stageId);
+    if (!st || index === st.active || !st.files[index]) return;
+    st.files[st.active].content = readEditorValue(stageId); // stash the outgoing file
+    st.active = index;
+    writeEditorValue(stageId, st.files[index].content);
+    renderEditorTabs(stageId);
+    broadcastActiveTab(stageId);
+}
+
+function newEditorTab(stageId) {
+    const st = tabStateFor(stageId);
+    if (!st) return;
+    if (st.files.length >= MAX_EDITOR_TABS) {
+        alert(`You can have up to ${MAX_EDITOR_TABS} files open here. Close one first.`);
+        return;
+    }
+    st.files[st.active].content = readEditorValue(stageId);
+    const ext = stageId === 'codeLayer' ? '.html' : '.md';
+    st.files.push({ name: 'untitled-' + (++st.seq) + ext, content: '' });
+    st.active = st.files.length - 1;
+    writeEditorValue(stageId, '');
+    renderEditorTabs(stageId);
+    broadcastActiveTab(stageId);
+}
+
+function closeEditorTab(stageId, index) {
+    const st = tabStateFor(stageId);
+    if (!st || st.files.length <= 1) return;
+    if (!confirm('Close "' + st.files[index].name + '"? Unsaved content in it is lost.')) return;
+    st.files.splice(index, 1);
+    if (st.active >= st.files.length) st.active = st.files.length - 1;
+    else if (index < st.active) st.active--;
+    writeEditorValue(stageId, st.files[st.active].content);
+    renderEditorTabs(stageId);
+    broadcastActiveTab(stageId);
+}
+
+function renameEditorTab(stageId, index) {
+    const st = tabStateFor(stageId);
+    if (!st || !st.files[index]) return;
+    const raw = prompt('File name:', st.files[index].name);
+    if (raw === null) return;
+    const clean = raw.trim().replace(/[<>]/g, '').substring(0, 40);
+    if (!clean) return;
+    st.files[index].name = clean;
+    renderEditorTabs(stageId);
+    broadcastActiveTab(stageId);
+}
+
+// Keep the active file's content in sync with what's actually typed, so
+// switching tabs never loses the last few keystrokes.
+function stashActiveTabContent(stageId) {
+    const st = tabStateFor(stageId);
+    if (st && st.files[st.active]) st.files[st.active].content = readEditorValue(stageId);
+}
+
 function runCode() {
     const code = myCodeEditor.getValue();
     const iframe = document.getElementById('codeOutput');
-    const doc = iframe.contentDocument || iframe.contentWindow.document;
-    doc.open();
-    doc.write(code);
-    doc.close();
+    if (!iframe) return;
+    // document.write() into the frame requires same-origin access, which is exactly
+    // the privilege we just removed by sandboxing it. srcdoc achieves the same
+    // result and keeps the code isolated from this page.
+    iframe.srcdoc = code;
 }
 
 // Markdown Studio
 document.getElementById('mdInput').addEventListener('input', (e) => {
     const val = e.target.value;
     renderMarkdown();
-    broadcastData({type: 'md-edit', text: val});
+    stashActiveTabContent('markdownLayer');
+    if (mayBroadcastEdits('markdownLayer')) broadcastData({type: 'md-edit', text: val, tabName: currentTabName('markdownLayer')});
+});
+
+// The Document editor has no async init to hook, so seed its tabs on load.
+window.addEventListener('load', () => {
+    const mi = document.getElementById('mdInput');
+    if (mi) initEditorTabs('markdownLayer', mi.value || '', 'notes.md');
 });
 
 function renderMarkdown() {
@@ -3166,9 +3773,35 @@ let rxFileName = "";
 let rxFileMime = "";
 let cancelFileTransfer = false; // Global abort switch
 
+// Opening a file to READ it yourself. Nothing is broadcast to anyone and nothing
+// is filed in the shared Resource Cabinet - it stays private unless you choose
+// "Send to Room".
+// Remembers whatever the Host currently has open privately, so that if they
+// turn Magnet on (or are already presenting and open a new file) it can be
+// pushed into guests' Host Screen mirror. Never touches the Resource Cabinet.
+window.currentPrivateMedia = null;
+
+function handlePrivateFileOpen(e) {
+    const f = e.target.files[0];
+    if (!f) return;
+    const MAX_SIZE = 5 * 1024 * 1024;
+    if (f.size > MAX_SIZE) { alert("File too large. Maximum size is 5MB."); e.target.value = ''; return; }
+    const r = new FileReader();
+    r.onload = ev => {
+        window.currentPrivateMedia = { dataUrl: ev.target.result, mime: f.type, name: f.name };
+        renderSharedMedia(ev.target.result, f.type, f.name, false);
+        logSystemMsg("Opened privately - not shared with the room.");
+        e.target.value = '';
+        // If already presenting, push this new file to guests immediately.
+        if (isHost && window.magnetMode && typeof broadcastMagnetState === 'function') broadcastMagnetState();
+    };
+    r.readAsDataURL(f);
+}
+
 function handleChunkedFileUpload(e) {
     const f = e.target.files[0]; 
     if(!f) return;
+    if (!isHost) { alert("Only the Host can send files to the room."); e.target.value = ''; return; }
     
     // 1. STRICT FILE SIZE LIMIT (5MB max for free WebRTC chunking)
     const MAX_SIZE = 5 * 1024 * 1024;
@@ -3216,7 +3849,7 @@ function handleChunkedFileUpload(e) {
                 if (pctEl) pctEl.innerText = "100% - COMPLETE";
                 setTimeout(() => document.getElementById('globalFileProgressWrapper').style.display = 'none', 2000); 
                 logSystemMsg("File successfully distributed to space.");
-                renderSharedMedia(b64, f.type, f.name); 
+                renderSharedMedia(b64, f.type, f.name, true); 
                 document.getElementById('fileUpload').value = ''; 
             } 
         }; 
@@ -3272,7 +3905,7 @@ function receiveFileChunk(i, d) {
     if(r === rxFileTotal) { 
         if (pctEl) pctEl.innerText = "100% - COMPLETE";
         setTimeout(() => document.getElementById('globalFileProgressWrapper').style.display = 'none', 2000); 
-        renderSharedMedia(rxFileChunks.join(''), rxFileMime, rxFileName); 
+        renderSharedMedia(rxFileChunks.join(''), rxFileMime, rxFileName, true); 
         rxFileChunks = []; // RAM CLEANUP: Dump from memory now that it's rendered
     } else {
         // Keep the timeout alive for the next chunk
@@ -3280,17 +3913,40 @@ function receiveFileChunk(i, d) {
     }
 }
 
-function renderSharedMedia(u, m, n) { 
+function renderSharedMedia(u, m, n, isShared) { 
     const cleanN = window.DOMPurify ? DOMPurify.sanitize(n, {ALLOWED_TAGS: []}).replace(/>/g, '&gt;').replace(/</g, '&lt;') : n.replace(/[<>]/g, '');
     switchMainStage('mediaLayer');
     const content = document.getElementById('mediaRenderContainer');
     
-    if (typeof addResourceToCabinet === 'function') addResourceToCabinet(cleanN, 'file', u, 'fas fa-file-alt');
+    // The Resource Cabinet is the room's SHARED record. Something opened only to
+    // look at privately never belongs in it - only a deliberate share, or a file
+    // that arrived from someone else, does.
+    if (isShared !== false && typeof addResourceToCabinet === 'function') addResourceToCabinet(cleanN, 'file', u, 'fas fa-file-alt');
     
+    // SECURITY: files arrive from other peers - treat the URL as untrusted. Only
+    // data:/blob: are allowed, and nodes are built rather than string-interpolated,
+    // so a crafted value can't close the src attribute or smuggle a javascript: URL.
+    if (!isSafeMediaUrl(u)) {
+        content.innerHTML = '';
+        const warn = document.createElement('div');
+        warn.style.cssText = 'color:#ff6666; text-align:center; padding:30px;';
+        warn.textContent = 'Blocked a shared file with an unexpected format.';
+        content.appendChild(warn);
+        return;
+    }
+
     if(m.startsWith('video/')) {
-        content.innerHTML = `<video src="${u}" controls autoplay style="width:100%; height:100%; object-fit:contain;"></video>`; 
+        content.innerHTML = '';
+        const v = document.createElement('video');
+        v.setAttribute('src', u); v.controls = true; v.autoplay = true;
+        v.style.cssText = 'width:100%; height:100%; object-fit:contain;';
+        content.appendChild(v);
     } else if(m.startsWith('image/')) {
-        content.innerHTML = `<img src="${u}" style="width:100%; height:100%; object-fit:contain;">`; 
+        content.innerHTML = '';
+        const i = document.createElement('img');
+        i.setAttribute('src', u);
+        i.style.cssText = 'width:100%; height:100%; object-fit:contain;';
+        content.appendChild(i);
   } else if(m === 'application/pdf') {
         content.innerHTML = `<div id="pdfViewer" style="width:100%; height:100%; overflow:auto; background:#333; display:flex; flex-direction:column; align-items:center; padding:10px; box-sizing:border-box;">
             <div style="color:white; margin-bottom:10px;">Loading Document...</div>
@@ -3323,17 +3979,45 @@ function renderSharedMedia(u, m, n) {
                     }
                 }).catch(err => {
                     console.error("PDF Render Error:", err);
-                    pdfViewer.innerHTML = `<div style="color:white; margin:auto;">Failed to load PDF. <a href="${u}" download="${cleanN}" style="color:var(--accent);">Download File</a></div>`;
+                    pdfViewer.innerHTML = '';
+                    const wrap = document.createElement('div');
+                    wrap.style.cssText = 'color:white; margin:auto;';
+                    wrap.appendChild(document.createTextNode('Failed to load PDF. '));
+                    const a = document.createElement('a');
+                    a.setAttribute('href', u); a.setAttribute('download', cleanN);
+                    a.style.color = 'var(--accent)';
+                    a.textContent = 'Download File';
+                    wrap.appendChild(a);
+                    pdfViewer.appendChild(wrap);
                 });
             } else {
                 fetch(u).then(res => res.blob()).then(blob => {
                     const blobUrl = URL.createObjectURL(blob);
-                    pdfViewer.innerHTML = `<iframe src="${blobUrl}" style="width:100%; height:100%; border:none; background:white;"></iframe>`;
+                    pdfViewer.innerHTML = '';
+                    const f = document.createElement('iframe');
+                    f.setAttribute('src', blobUrl);
+                    f.setAttribute('sandbox', '');
+                    f.style.cssText = 'width:100%; height:100%; border:none; background:white;';
+                    pdfViewer.appendChild(f);
                 });
             }
         });
     } else {
-        content.innerHTML = `<div style="text-align:center;color:white;"><i class="fas fa-file" style="font-size:5rem; color:var(--accent);"></i><h3 style="margin:20px 0; font-family:'Cinzel',serif; font-weight:normal; letter-spacing:2px;">${cleanN}</h3><a href="${u}" download="${cleanN}" class="btn">Download Archive</a></div>`; 
+        content.innerHTML = '';
+        const d = document.createElement('div');
+        d.style.cssText = 'text-align:center;color:white;';
+        const ic = document.createElement('i');
+        ic.className = 'fas fa-file';
+        ic.style.cssText = 'font-size:5rem; color:var(--accent);';
+        const h3 = document.createElement('h3');
+        h3.style.cssText = "margin:20px 0; font-family:'Cinzel',serif; font-weight:normal; letter-spacing:2px;";
+        h3.textContent = cleanN;
+        const a = document.createElement('a');
+        a.setAttribute('href', u); a.setAttribute('download', cleanN);
+        a.className = 'btn';
+        a.textContent = 'Download Archive';
+        d.appendChild(ic); d.appendChild(h3); d.appendChild(a);
+        content.appendChild(d);
     }
 }
 
@@ -3443,8 +4127,20 @@ function triggerWebBrowser() {
     if(u) loadSharedBrowser(u, true); 
 }
 
+function openMagnetScreen() {
+    switchMainStage('magnetLayer');
+    updateMagnetView(window.magnetizedStageId);
+}
+
 function openDirectYouTube() {
     switchMainStage('youtubeLayer');
+    // FIX: opening this app used to show a blank black frame until someone pasted
+    // a link. Now the first open auto-loads a default video so there's always
+    // something on screen. Muted, because this can fire without a direct tap on
+    // the player itself and browsers block unmuted autoplay in that case.
+    if (!currentYtVideoId) {
+        loadYtVideoLocally(DEFAULT_YT_VIDEO_ID, { muted: true, announce: false });
+    }
 }
 
 function loadSharedBrowser(u, e) { 
@@ -3452,9 +4148,21 @@ function loadSharedBrowser(u, e) {
     document.getElementById('sharedBrowser').src = u; 
     document.getElementById('externalLinkBtn').href = u; 
     switchMainStage('browserLayer'); 
+
+    // Most big sites (Google, YouTube, Facebook, banks, most news sites) send an
+    // X-Frame-Options / frame-ancestors header that forbids being displayed inside
+    // another site's frame. The browser blocks it before any of our code runs, so
+    // there is no client-side way to force them to load - the honest fix is to
+    // offer the "Open in new tab" escape hatch, which is what this notice points at.
+    const notice = document.getElementById('browserBlockedNotice');
+    if (notice) {
+        notice.style.display = 'block';
+        clearTimeout(window._browserNoticeTimer);
+        window._browserNoticeTimer = setTimeout(() => { notice.style.display = 'none'; }, 9000);
+    }
     
     // AUTO-CAPTURE TO CABINET
-    if (typeof addResourceToCabinet === 'function') addResourceToCabinet(u, 'link', u, 'fas fa-globe');
+    if (e && typeof addResourceToCabinet === 'function') addResourceToCabinet(u, 'link', u, 'fas fa-globe');
     
     if(e) { broadcastData({type: 'iframe-load', url: u}); logSystemMsg("External interface rendered."); } 
 }
@@ -3497,13 +4205,29 @@ function hideYtLoadingOverlay() {
     if (o) o.style.display = 'none';
 }
 
+// There are now TWO independent YouTube players:
+//   target 'main'   -> #ytPlayer       - this user's OWN video, nobody else touches it
+//   target 'magnet' -> #magnetYtPlayer - a read-only mirror of the Host's video,
+//                                        shown inside the Host Screen app
+// Keeping them separate is what stops the Host's broadcast from wiping out
+// whatever the guest was personally watching.
+let magnetYtPlayer = null;
+let magnetYtVideoId = null;
+
+function getYtPlayer(target) {
+    return target === 'magnet' ? magnetYtPlayer : ytPlayer;
+}
+
 function createOrLoadYtVideo(videoId, opts = {}) {
-    const { startTime = 0, muted = true, onReadyExtra = null, retries = 10, autoplay = 1 } = opts;
-    showYtLoadingOverlay();
+    const { startTime = 0, muted = true, onReadyExtra = null, retries = 10, target = 'main' } = opts;
+    const isMagnet = (target === 'magnet');
+    const elementId = isMagnet ? 'magnetYtPlayer' : 'ytPlayer';
+
+    if (!isMagnet) showYtLoadingOverlay();
 
     if (!window.ytApiReady || typeof YT === 'undefined' || !YT.Player) {
         if (retries > 0) {
-            setTimeout(() => createOrLoadYtVideo(videoId, { startTime, muted, onReadyExtra, retries: retries - 1, autoplay }), 500);
+            setTimeout(() => createOrLoadYtVideo(videoId, { startTime, muted, onReadyExtra, retries: retries - 1, target }), 500);
         } else {
             console.warn("YouTube API failed to initialize.");
             logSystemMsg("YouTube connection failed.");
@@ -3512,198 +4236,627 @@ function createOrLoadYtVideo(videoId, opts = {}) {
         return;
     }
 
-    if (typeof ytPlayer !== 'undefined' && ytPlayer && typeof ytPlayer.loadVideoById === 'function') {
-        ytPlayer.loadVideoById(videoId, startTime);
-        if (muted) { ytPlayer.mute(); window.guestNeedsUnmute = true; }
-        if (onReadyExtra) onReadyExtra(ytPlayer);
+    const existing = getYtPlayer(target);
+    if (existing && typeof existing.loadVideoById === 'function') {
+        existing.loadVideoById(videoId, startTime);
+        if (muted) { existing.mute(); if (!isMagnet) window.guestNeedsUnmute = true; }
+        if (onReadyExtra) onReadyExtra(existing);
         // Player already exists and is visible - fade the overlay out shortly after
         // the new video starts buffering rather than waiting on a fresh 'onReady'
         // (loadVideoById doesn't re-fire onReady).
-        setTimeout(hideYtLoadingOverlay, 600);
+        if (!isMagnet) setTimeout(hideYtLoadingOverlay, 600);
         return;
     }
 
-    ytPlayer = new YT.Player('ytPlayer', {
+    if (!document.getElementById(elementId)) return;
+
+    const player = new YT.Player(elementId, {
         height: '100%', width: '100%', videoId: videoId,
-        playerVars: { 'autoplay': autoplay, 'controls': 1, 'mute': muted ? 1 : 0, 'rel': 0, 'start': Math.floor(startTime), 'origin': window.location.origin },
+        // FIX: 'origin' must match the real page origin or YouTube refuses to play
+        // and shows "This video is unavailable". Opened from a file:// path (or any
+        // non-http context) window.location.origin is the string "null", which never
+        // matches - so we simply omit the parameter unless we're on real http(s).
+        playerVars: Object.assign(
+            // cc_load_policy:1 asks YouTube to prepare the caption track up front.
+            // Without it the captions module often isn't present at all on the
+            // mirror player, which is why the CC button did nothing there.
+            { 'autoplay': 1, 'controls': isMagnet ? 0 : 1, 'mute': muted ? 1 : 0, 'rel': 0, 'playsinline': 1,
+              'cc_load_policy': 1, 'start': Math.floor(startTime) },
+            /^https?:$/.test(window.location.protocol) ? { 'origin': window.location.origin } : {}
+        ),
         events: {
             'onReady': e => {
-                if (muted) window.guestNeedsUnmute = true;
+                if (muted && !isMagnet) window.guestNeedsUnmute = true;
                 if (onReadyExtra) onReadyExtra(e.target);
-                hideYtLoadingOverlay();
+                if (!isMagnet) hideYtLoadingOverlay();
             },
             'onStateChange': e => {
-                if (!isHost) return;
+                // Only the Host's OWN player drives the room, and only while Magnet
+                // Mode is on. The mirror never broadcasts anything.
+                if (isMagnet || !isHost || !window.magnetMode) return;
                 const s = ytPlayer.getPlayerState();
                 if (s === 1 || s === 2 || s === 3) {
                     broadcastData({ type: 'yt-master-sync', vidId: currentYtVideoId, time: ytPlayer.getCurrentTime(), state: s });
                 }
             },
             'onError': e => {
-                // 2=invalid ID, 5=HTML5 player error, 100=not found/private,
-                // 101/150=embedding disabled by the video's owner (nothing we can fix client-side)
-                const reasons = { 2: 'Invalid video link.', 5: 'This video cannot be played here.', 100: 'Video not found or private.', 101: "This video's owner has disabled embedding.", 150: "This video's owner has disabled embedding." };
-                logSystemMsg("⚠️ YouTube: " + (reasons[e.data] || 'Playback error.'));
-                hideYtLoadingOverlay();
+                // 2  = malformed ID
+                // 5  = HTML5 player error
+                // 100= video removed or private
+                // 101/150 = the UPLOADER switched off embedding. YouTube enforces this
+                //   server-side, so no website can play these in an embedded player -
+                //   the only route is opening the video on YouTube itself. This is by
+                //   far the most common cause, especially for official music videos.
+                const reasons = {
+                    2: 'That link doesn\'t contain a valid video ID.',
+                    5: 'This video can\'t be played in an embedded player.',
+                    100: 'That video was removed or is private.',
+                    101: "The uploader has disabled playback on other sites.",
+                    150: "The uploader has disabled playback on other sites."
+                };
+                // Surface the raw YouTube error code too. 101/150 = the uploader
+                // disabled off-site playback (unfixable by any website); 2 = bad ID;
+                // 5 = player error; 100 = removed/private. Knowing WHICH code fired is
+                // the only way to tell an app bug apart from a YouTube-side block.
+                const msg = (reasons[e.data] || 'Playback error.') + ' [code ' + e.data + ']';
+                logSystemMsg("⚠️ YouTube: " + msg);
+                if (!isMagnet) {
+                    hideYtLoadingOverlay();
+                    // Codes 5/101/150 are often an origin/referrer artefact rather than a
+                    // true block, and the nocookie host frequently plays them fine. Try
+                    // that automatically once before showing the error wall.
+                    if (!window._ytFallbackTried && (e.data === 5 || e.data === 150 || e.data === 101)) {
+                        window._ytFallbackTried = true;
+                        logSystemMsg("Retrying through the alternate player...");
+                        setTimeout(() => tryAlternateYtPlayer(), 250);
+                        return;
+                    }
+                    showYtError(msg, videoId);
+                }
             }
         }
     });
+
+    if (isMagnet) magnetYtPlayer = player; else ytPlayer = player;
+
     // Safety net: never leave the overlay stuck forever if some browser quirk
     // swallows the onReady/onError events.
-    setTimeout(hideYtLoadingOverlay, 8000);
+    if (!isMagnet) setTimeout(hideYtLoadingOverlay, 8000);
 }
-// Shared "actually broadcast this video to the room" step - used by both the
-// paste-a-link flow (triggerYouTubeSync) and picking a result from search
-// (pickYtSearchResult), so there's only one path that does the real work.
-function broadcastYtVideo(vidId) {
-    if (!isHost) {
-        alert("Only the Host can broadcast a new video to the room.");
-        return;
+// ==========================================
+// YOUTUBE - fully independent per person, no API key, no search integration.
+// Everyone (Host and guests) just pastes a link. Whatever you load plays only
+// for you. The Host's video is pushed to the room ONLY while Magnet Mode is on,
+// and even then it lands in the separate Host Screen mirror - never on top of
+// the video you personally chose.
+// ==========================================
+
+// Shown automatically when you open the YouTube app with nothing playing yet,
+// so the tab never looks like a dead black rectangle. Swap this ID for any
+// video you'd rather have as the default.
+const DEFAULT_YT_VIDEO_ID = 'jfKfPfyJRdk'; // lofi hip hop radio - 24/7 live stream
+
+// Accepts every URL shape YouTube uses, not just the classic watch?v= form:
+// youtu.be/ID, /watch?v=ID, /embed/ID, /shorts/ID, /live/ID, m.youtube.com,
+// music.youtube.com, extra ?si=/&t= tracking params, or a bare 11-char ID.
+function extractYtId(raw) {
+    if (!raw) return null;
+    let input = raw.trim();
+    if (/^[A-Za-z0-9_-]{11}$/.test(input)) return input;
+    if (!/^https?:\/\//i.test(input)) input = 'https://' + input;
+    try {
+        const u = new URL(input);
+        if (!/(^|\.)(youtube\.com|youtube-nocookie\.com|youtu\.be)$/i.test(u.hostname)) return null;
+        const v = u.searchParams.get('v');
+        if (v && /^[A-Za-z0-9_-]{11}$/.test(v)) return v;
+        const parts = u.pathname.split('/').filter(Boolean);
+        if (u.hostname.toLowerCase().endsWith('youtu.be') && parts[0] && /^[A-Za-z0-9_-]{11}$/.test(parts[0])) return parts[0];
+        const i = parts.findIndex(p => ['embed', 'shorts', 'live', 'v'].includes(p.toLowerCase()));
+        if (i !== -1 && parts[i + 1] && /^[A-Za-z0-9_-]{11}$/.test(parts[i + 1])) return parts[i + 1];
+    } catch (err) { /* not a parseable URL */ }
+    return null;
+}
+
+// Last-resort attempt for a video the JS player refused: swap in a plain
+// youtube-nocookie iframe. This genuinely helps when the refusal came from a
+// referrer/origin quirk. It will NOT help when the uploader has switched off
+// off-site playback - that's enforced on YouTube's servers and no embed of any
+// kind can get around it.
+function tryAlternateYtPlayer() {
+    if (!currentYtVideoId) return;
+    const host = document.getElementById('ytPlayer');
+    if (!host) return;
+    hideYtError();
+    try { if (ytPlayer && typeof ytPlayer.destroy === 'function') ytPlayer.destroy(); } catch (err) {}
+    ytPlayer = null;
+    host.innerHTML = '<iframe src="https://www.youtube-nocookie.com/embed/' + encodeURIComponent(currentYtVideoId) +
+        '?autoplay=1&playsinline=1&rel=0" style="width:100%;height:100%;border:0;" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>';
+    logSystemMsg("Trying the alternate YouTube player...");
+}
+
+function hideYtError() {
+    const box = document.getElementById('ytErrorCard');
+    if (box) box.style.display = 'none';
+}
+
+function showYtError(message, vidId) {
+    const box = document.getElementById('ytErrorCard');
+    if (!box) return;
+    const text = document.getElementById('ytErrorText');
+    const link = document.getElementById('ytErrorLink');
+    if (text) text.textContent = message;
+    if (link) {
+        link.href = 'https://www.youtube.com/watch?v=' + encodeURIComponent(vidId || '');
+        link.style.display = vidId ? 'inline-block' : 'none';
     }
+    box.style.display = 'flex';
+}
+
+function loadYtVideoLocally(vidId, opts = {}) {
+    hideYtError();
+    window._ytFallbackTried = false; // new video, new chance at the normal player
+    // If a previous video fell back to the raw iframe, clear it out so the normal
+    // JS-API player can be rebuilt cleanly for this one.
+    const ytHost = document.getElementById('ytPlayer');
+    if (ytHost && ytHost.querySelector('iframe') && !ytPlayer) ytHost.innerHTML = '';
+    const { muted = false, announce = true } = opts;
     currentYtVideoId = vidId;
     switchMainStage('youtubeLayer');
+    // Only a video actually pushed to the room belongs in the shared cabinet.
+    // Private viewing (magnet off, or any guest) stays private.
+    const willShare = isHost && window.magnetMode && announce;
+    if (willShare && typeof addResourceToCabinet === 'function') {
+        addResourceToCabinet('YouTube Video', 'youtube', `https://youtube.com/watch?v=${vidId}`, 'fab fa-youtube');
+    }
+    // Unmuted by default - this is always a direct user tap (a real user gesture),
+    // which is what browsers require before allowing audio.
+    createOrLoadYtVideo(vidId, { muted: muted, target: 'main' });
 
-    if (typeof addResourceToCabinet === 'function') addResourceToCabinet('YouTube Video', 'youtube', `https://youtube.com/watch?v=${vidId}`, 'fab fa-youtube');
-
-    // Host plays unmuted by default (their own explicit click = user gesture, so autoplay-with-sound is allowed)
-    createOrLoadYtVideo(vidId, { muted: false });
-
-    broadcastData({type: 'yt-load', vidId: vidId});
-    logSystemMsg("Broadcasting YouTube media.");
+    // Host pushes to the room only while Magnet Mode is on.
+    if (isHost && window.magnetMode && announce) {
+        broadcastData({ type: 'yt-load', vidId: vidId });
+        logSystemMsg("Broadcasting YouTube media to the room.");
+    }
 }
 
 function triggerYouTubeSync() { 
-    if (!isHost) {
-        alert("Only the Host can broadcast a new video to the room.");
-        return;
-    }
-    const input = document.getElementById('ytInput').value.trim(); 
+    const el = document.getElementById('ytInput');
+    if (!el) return;
+    const input = el.value.trim(); 
     if(!input) return;
 
-    const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i;
-    const match = input.match(regex);
-    const vidId = match ? match[1] : input;
-
-    if (vidId.length === 11) {
-        broadcastYtVideo(vidId);
-        document.getElementById('ytInput').value = ''; 
+    const vidId = extractYtId(input);
+    if (vidId) {
+        loadYtVideoLocally(vidId);
+        el.value = ''; 
     } else {
-        alert("Invalid YouTube Link. Please paste a standard YouTube URL.");
+        showYtError("That doesn't look like a YouTube link. Paste a youtube.com or youtu.be link.", null);
     }
 }
 
 // ==========================================
-// YOUTUBE SEARCH (Host only)
-// Uses the public YouTube Data API v3 "search" endpoint. Requires the Host to
-// supply their own free API key (see the collapsible box in the panel) since
-// this is a static client-side app with no backend to hide a shared key behind -
-// any key baked into the code would be visible to anyone and could be abused.
+// HOST SCREEN (MAGNET MIRROR)
+// A completely separate stage that mirrors whatever the Host is presenting
+// while Magnet Mode is on. Everything the Host sends is rendered HERE - on its
+// own canvas and its own video player - so a guest's own whiteboard drawing,
+// code, documents and video are never overwritten by the broadcast.
 // ==========================================
-function saveYtApiKey() {
-    const key = document.getElementById('ytApiKeyInput').value.trim();
-    try { localStorage.setItem('superroom_yt_api_key', key); } catch (e) { console.warn("Could not save YouTube API key:", e); }
+let magnetCanvas = null, magnetCtx = null;
+
+function initMagnetMirror() {
+    if (magnetCanvas) return;
+    magnetCanvas = document.getElementById('magnetCanvas');
+    if (magnetCanvas) magnetCtx = magnetCanvas.getContext('2d');
 }
 
-window.addEventListener('load', () => {
-    const keyInput = document.getElementById('ytApiKeyInput');
-    if (!keyInput) return;
-    try {
-        const savedKey = localStorage.getItem('superroom_yt_api_key');
-        if (savedKey) keyInput.value = savedKey;
-    } catch (e) { /* localStorage unavailable, ignore */ }
-});
+function resizeMagnetCanvas() {
+    initMagnetMirror();
+    const stage = document.querySelector('.main-stage');
+    if (!magnetCanvas || !stage) return;
+    // Mirror the SAME pixel dimensions as the real whiteboard, otherwise the
+    // Host's incoming coordinates would land in the wrong place.
+    if (magnetCanvas.width !== stage.clientWidth) {
+        let snapshot = null;
+        if (magnetCanvas.width > 0) snapshot = magnetCtx.getImageData(0, 0, magnetCanvas.width, magnetCanvas.height);
+        magnetCanvas.width = stage.clientWidth;
+        magnetCanvas.height = stage.clientHeight;
+        magnetCtx.fillStyle = '#0a0a0a';
+        magnetCtx.fillRect(0, 0, magnetCanvas.width, magnetCanvas.height);
+        if (snapshot) magnetCtx.putImageData(snapshot, 0, 0);
+    }
+}
 
-function renderYtSearchResults(items) {
-    const box = document.getElementById('ytSearchResults');
+// True when incoming Host content should go to the mirror instead of my own work.
+function shouldMirrorHostContent() {
+    if (isHost || !window.isGuestMagnetized) return false;
+    // A guest who's been granted edit access is standing on the REAL stage
+    // now (e.g. the actual Canvas, not the Host Screen mirror) - let the
+    // Host's content land there directly instead of a mirror nobody's on.
+    if (window.magnetizedStageId && window.myEditPermissions && window.myEditPermissions[window.magnetizedStageId]) return false;
+    return true;
+}
+
+function mirrorDraw(m) {
+    resizeMagnetCanvas();
+    if (!magnetCtx) return;
+    magnetCtx.beginPath();
+    applyToolContext(magnetCtx, m.tool, m.color, m.size);
+    magnetCtx.moveTo(m.x0, m.y0);
+    magnetCtx.lineTo(m.x1, m.y1);
+    magnetCtx.stroke();
+    magnetCtx.globalCompositeOperation = 'source-over';
+    magnetCtx.globalAlpha = 1.0;
+}
+
+function mirrorText(text, x, y, color, font, size) {
+    resizeMagnetCanvas();
+    if (!magnetCtx) return;
+    const clean = window.DOMPurify ? DOMPurify.sanitize(text, { ALLOWED_TAGS: [] }) : text;
+    magnetCtx.font = `bold ${size * 6}px '${font}'`;
+    magnetCtx.fillStyle = color;
+    magnetCtx.globalCompositeOperation = 'source-over';
+    magnetCtx.fillText(clean, x, y);
+}
+
+// SECURITY: file payloads arrive from other peers, so their URL and MIME type are
+// untrusted input. Interpolating them into a src="..." template let a crafted
+// value close the attribute and inject markup, and permitted javascript:/vbscript:
+// URLs outright. Only data: and blob: URLs are accepted now, and every element is
+// built with createElement + setAttribute so nothing is ever parsed as HTML.
+function isSafeMediaUrl(u) {
+    return typeof u === 'string' && /^(data:|blob:)/i.test(u.trim());
+}
+
+// Read-only mirror of a file the Host has privately open - mirrors renderSharedMedia's
+// type handling but never touches the Resource Cabinet and is never interactive.
+function renderMagnetMedia(u, m, n) {
+    const box = document.getElementById('magnetMediaContainer');
+    if (!box) return;
+    const cleanN = window.DOMPurify ? DOMPurify.sanitize(n || '', { ALLOWED_TAGS: [] }) : (n || '').replace(/[<>]/g, '');
     box.innerHTML = '';
-    box.style.display = 'block';
 
-    if (!items || items.length === 0) {
-        const empty = document.createElement('p');
-        empty.style.cssText = 'padding:12px; color:#888; font-size:0.75rem; margin:0;';
-        empty.textContent = 'No results found.';
-        box.appendChild(empty);
+    if (!isSafeMediaUrl(u)) {
+        const warn = document.createElement('div');
+        warn.style.cssText = 'color:#ff6666; text-align:center; padding:30px; font-size:0.8rem;';
+        warn.textContent = 'Blocked a file with an unexpected format.';
+        box.appendChild(warn);
         return;
     }
 
-    items.forEach(item => {
-        if (!item.id || !item.id.videoId) return;
-        const vidId = item.id.videoId;
-        const title = (item.snippet && item.snippet.title) || 'Untitled';
-        const thumbUrl = item.snippet && item.snippet.thumbnails && (item.snippet.thumbnails.default || item.snippet.thumbnails.medium);
+    const styleAll = 'width:100%; height:100%; object-fit:contain;';
+    if (m && m.startsWith('video/')) {
+        const v = document.createElement('video');
+        v.setAttribute('src', u); v.controls = true; v.style.cssText = styleAll;
+        box.appendChild(v);
+    } else if (m && m.startsWith('image/')) {
+        const i = document.createElement('img');
+        i.setAttribute('src', u); i.style.cssText = styleAll;
+        box.appendChild(i);
+    } else if (m === 'application/pdf') {
+        const f = document.createElement('iframe');
+        f.setAttribute('src', u);
+        f.setAttribute('sandbox', '');   // PDF preview needs no scripting at all
+        f.style.cssText = 'width:100%; height:100%; border:0; background:#fff;';
+        box.appendChild(f);
+    } else {
+        const d = document.createElement('div');
+        d.style.cssText = 'color:#888; text-align:center; padding:30px; font-size:0.85rem;';
+        const ic = document.createElement('i');
+        ic.className = 'fas fa-file';
+        ic.style.cssText = 'font-size:2rem; display:block; margin-bottom:10px;';
+        const sub = document.createElement('span');
+        sub.style.cssText = 'font-size:0.7rem; color:#666; display:block; margin-top:6px;';
+        sub.textContent = 'This file type has no inline preview.';
+        d.appendChild(ic);
+        d.appendChild(document.createTextNode(cleanN));
+        d.appendChild(sub);
+        box.appendChild(d);
+    }
+}
 
-        const row = document.createElement('div');
-        row.style.cssText = 'display:flex; align-items:center; gap:10px; padding:8px; cursor:pointer; border-bottom:1px solid #222;';
-        row.onmouseenter = () => row.style.background = '#111';
-        row.onmouseleave = () => row.style.background = 'transparent';
+function mirrorClear() {
+    resizeMagnetCanvas();
+    if (!magnetCtx || !magnetCanvas) return;
+    magnetCtx.clearRect(0, 0, magnetCanvas.width, magnetCanvas.height);
+    magnetCtx.fillStyle = '#0a0a0a';
+    magnetCtx.fillRect(0, 0, magnetCanvas.width, magnetCanvas.height);
+}
 
-        const img = document.createElement('img');
-        img.src = thumbUrl ? thumbUrl.url : '';
-        img.style.cssText = 'width:60px; height:45px; object-fit:cover; border-radius:2px; flex-shrink:0; background:#000;';
+function mirrorImage(dataUrl) {
+    resizeMagnetCanvas();
+    if (!magnetCtx) return;
+    const img = new Image();
+    img.onload = () => magnetCtx.drawImage(img, 0, 0);
+    img.src = dataUrl;
+}
 
-        const span = document.createElement('span');
-        span.style.cssText = 'font-size:0.75rem; color:#ddd; line-height:1.3;';
-        span.textContent = title; // textContent, never innerHTML - safe against titles containing markup
+// Swaps the Host Screen between its whiteboard mirror, its video mirror, and a
+// plain "what the Host is doing" card for stages that can't be mirrored.
+const MAGNET_STAGE_LABELS = {
+    videoLayer: 'the video grid',
+    whiteboardLayer: 'the whiteboard',
+    codeLayer: 'the code editor',
+    markdownLayer: 'a document',
+    gameLayer: 'a game',
+    youtubeLayer: 'a YouTube video',
+    screenLayer: 'a shared screen',
+    browserLayer: 'a web page',
+    mediaLayer: 'a file'
+};
 
-        row.appendChild(img);
-        row.appendChild(span);
-        row.onclick = () => pickYtSearchResult(vidId);
-        box.appendChild(row);
+// Stages that carry a guest's OWN private work - the Host's version of these is
+// mirrored inside the Host Screen app so the guest's copy is never overwritten.
+// Only stages that hold a guest's OWN private, non-shared work go through
+// the mirror. Code and Document are a live shared room-wide space already
+// (see 'code-edit'/'md-edit' above) so Magnet just jumps a guest straight to
+// the real thing, same as games/browser.
+// Screen Share is included here too: instead of forcibly yanking a guest away
+// from whatever they're doing whenever the Host shares their screen, it now
+// surfaces inside the guest's own Host Screen app, same as YouTube/media.
+const MAGNET_MIRRORED_STAGES = ['whiteboardLayer', 'youtubeLayer', 'mediaLayer', 'screenLayer', 'codeLayer', 'markdownLayer'];
+// Stages that are already a single shared thing for the whole room (a game board,
+// a distributed file, a shared screen, a web page). There's no private guest copy
+// to protect, so the guest is simply taken to the real app - which is why these
+// used to show a useless "cannot be mirrored" card.
+function isSharedStage(stage) {
+    return !!stage && !MAGNET_MIRRORED_STAGES.includes(stage) && stage !== 'magnetLayer';
+}
+
+// ==========================================
+// MAGNET INTERFERENCE SHIELD + EDIT PERMISSION REQUESTS
+// ==========================================
+// While Magnet is on, Development/Document/Canvas are "shared" apps a guest
+// gets jumped straight into (see isSharedStage above) - which used to mean
+// they could freely type over the Host's live work. This shield sits on top
+// of those three apps, blocking clicks/keystrokes, until the Host explicitly
+// grants that specific guest edit access. (Recreation/games already have
+// their own seat-based move validation on the Host - see chessPlayerWhite/
+// chessPlayerBlack checks - so it isn't duplicated here.)
+const MAGNET_SHIELDED_STAGES = ['whiteboardLayer'];
+// FIX: the Host's incoming-request guard used to reuse MAGNET_SHIELDED_STAGES,
+// which only covers the whiteboard now that Development/Document moved to the
+// read-only mirror. Requests from those two were being dropped on arrival, so
+// the Host never saw a prompt and the guest just sat on "Waiting...". Requestable
+// and shielded are different things and now have their own lists.
+const MAGNET_REQUESTABLE_STAGES = ['whiteboardLayer', 'codeLayer', 'markdownLayer'];
+const MAGNET_SHIELD_LABELS = { codeLayer: 'Development', markdownLayer: 'Document', whiteboardLayer: 'Canvas' };
+window.myEditPermissions = window.myEditPermissions || {};   // guest-side: {stageId: true}
+window.pendingEditRequests = window.pendingEditRequests || {}; // host-side: {reqId: {peerId, name, stage}}
+
+// The mirror is read-only, so the only affordance a guest needs there is a
+// small "ask to edit" pill - same idea as the whiteboard shield pill, but it
+// lives inside the Host Screen app rather than over their own work.
+function hideMagnetEditRequestBtn() {
+    const b = document.getElementById('magnetEditRequestBtn');
+    if (b) b.style.display = 'none';
+}
+
+function showMagnetEditRequestBtn(stageId) {
+    if (isHost) return;
+    if (window.myEditPermissions && window.myEditPermissions[stageId]) return;
+    let b = document.getElementById('magnetEditRequestBtn');
+    if (!b) {
+        b = document.createElement('button');
+        b.id = 'magnetEditRequestBtn';
+        b.className = 'btn';
+        b.style.cssText = 'position:absolute; bottom:16px; right:16px; z-index:60; font-size:0.7rem; padding:8px 16px; border-radius:30px;';
+        const host = document.getElementById('magnetLayer');
+        const box = host ? host.querySelector('.media-box') : null;
+        (box || host || document.body).appendChild(b);
+    }
+    b.innerHTML = '<i class="fas fa-hand-paper"></i> Ask to Edit';
+    b.disabled = false;
+    b.onclick = () => {
+        b.disabled = true;
+        b.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Waiting...';
+        broadcastData({ type: 'edit-request', stage: stageId, name: myDisplayName });
+    };
+    b.style.display = 'block';
+}
+
+function ensureMagnetShield(stageId) {
+    const container = document.getElementById(stageId);
+    if (!container) return null;
+    let shield = document.getElementById('magnetShield-' + stageId);
+    if (shield) return shield;
+
+    shield = document.createElement('div');
+    shield.id = 'magnetShield-' + stageId;
+    shield.className = 'magnet-shield';
+    shield.innerHTML = `
+        <div class="magnet-shield-card">
+            <i class="fas fa-lock"></i>
+            <p class="magnet-shield-title">The Host is presenting <span class="magnet-shield-app"></span></p>
+            <p class="magnet-shield-sub">You're in view-only mode so you can't interrupt what they're showing.</p>
+            <button type="button" class="btn magnet-shield-btn"><i class="fas fa-hand-paper"></i> Ask Host for Edit Access</button>
+            <p class="magnet-shield-status"></p>
+        </div>`;
+    shield.querySelector('.magnet-shield-btn').addEventListener('click', () => requestEditAccess(stageId));
+    container.appendChild(shield);
+    return shield;
+}
+
+// Locks the real input underneath the shield too, not just the overlay -
+// belt-and-braces so a stray focused editor/textarea can't still take keys.
+function setStageInteractive(stageId, interactive) {
+    if (stageId === 'codeLayer' && typeof myCodeEditor !== 'undefined' && myCodeEditor) {
+        myCodeEditor.setOption('readOnly', interactive ? false : 'nocursor');
+    }
+    if (stageId === 'markdownLayer') {
+        const mi = document.getElementById('mdInput');
+        if (mi) mi.readOnly = !interactive;
+    }
+}
+
+// Call whenever the visible stage, Magnet state, or a permission grant changes.
+function refreshMagnetShield() {
+    MAGNET_SHIELDED_STAGES.forEach(stageId => {
+        const shield = document.getElementById('magnetShield-' + stageId);
+        const isCurrent = typeof currentActiveStage !== 'undefined' && currentActiveStage === stageId;
+        const shouldShield = !isHost && isCurrent && window.isGuestMagnetized &&
+            window.magnetizedStageId === stageId && !window.myEditPermissions[stageId];
+
+        setStageInteractive(stageId, !shouldShield);
+
+        if (shouldShield) {
+            const s = ensureMagnetShield(stageId);
+            if (!s) return;
+            const appName = s.querySelector('.magnet-shield-app');
+            if (appName) appName.textContent = MAGNET_SHIELD_LABELS[stageId] || 'this app';
+            const status = s.querySelector('.magnet-shield-status');
+            if (status) status.textContent = '';
+            const btn = s.querySelector('.magnet-shield-btn');
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-hand-paper"></i> Ask Host for Edit Access'; }
+            s.style.display = 'flex';
+        } else if (shield) {
+            shield.style.display = 'none';
+        }
     });
 }
 
-async function searchYouTube() {
-    if (!isHost) {
-        alert("Only the Host can search and broadcast video.");
-        return;
-    }
-    const query = document.getElementById('ytSearchInput').value.trim();
-    if (!query) return;
-
-    let apiKey = '';
-    try { apiKey = localStorage.getItem('superroom_yt_api_key') || ''; } catch (e) { /* ignore */ }
-
-    if (!apiKey) {
-        alert('Add your YouTube Data API key first (see "YouTube Search API Key" below) to search by name.\n\nOr just paste a direct video link/ID instead - that never needs a key.');
-        return;
-    }
-
-    const box = document.getElementById('ytSearchResults');
-    box.style.display = 'block';
-    box.innerHTML = '<p style="padding:12px; color:#888; font-size:0.75rem; margin:0;">Searching...</p>';
-
-    try {
-        const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=8&q=${encodeURIComponent(query)}&key=${encodeURIComponent(apiKey)}`;
-        const res = await fetch(url);
-        const data = await res.json();
-
-        if (!res.ok) {
-            const msg = (data && data.error && data.error.message) || 'Search failed. Check your API key.';
-            box.innerHTML = '';
-            const err = document.createElement('p');
-            err.style.cssText = 'padding:12px; color:#ff4444; font-size:0.75rem; margin:0;';
-            err.textContent = msg;
-            box.appendChild(err);
-            return;
-        }
-
-        renderYtSearchResults(data.items || []);
-    } catch (e) {
-        console.warn("YouTube search failed:", e);
-        box.innerHTML = '';
-        const err = document.createElement('p');
-        err.style.cssText = 'padding:12px; color:#ff4444; font-size:0.75rem; margin:0;';
-        err.textContent = 'Search request failed. Check your connection.';
-        box.appendChild(err);
-    }
+// Guest clicked "Ask Host for Edit Access" on a shield.
+function requestEditAccess(stageId) {
+    const shield = document.getElementById('magnetShield-' + stageId);
+    const btn = shield ? shield.querySelector('.magnet-shield-btn') : null;
+    const status = shield ? shield.querySelector('.magnet-shield-status') : null;
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Waiting for Host...'; }
+    if (status) status.textContent = 'Request sent - hang tight.';
+    broadcastData({ type: 'edit-request', stage: stageId, name: myDisplayName });
 }
 
-function pickYtSearchResult(vidId) {
-    broadcastYtVideo(vidId);
-    const box = document.getElementById('ytSearchResults');
-    if (box) box.style.display = 'none';
-    const input = document.getElementById('ytSearchInput');
-    if (input) input.value = '';
+// --- HOST SIDE: incoming requests render as a small Allow/Deny toast ---
+function renderEditRequestToast(reqId) {
+    const req = window.pendingEditRequests[reqId];
+    if (!req) return;
+    let stack = document.getElementById('editRequestToastStack');
+    if (!stack) {
+        stack = document.createElement('div');
+        stack.id = 'editRequestToastStack';
+        document.body.appendChild(stack);
+    }
+    // Re-requesting the same app replaces the earlier toast instead of stacking dupes.
+    const existing = document.getElementById('editReqToast-' + reqId);
+    if (existing) existing.remove();
+
+    // SECURITY: built with DOM nodes + textContent rather than an innerHTML
+    // template. The old version interpolated a peer-supplied display name and
+    // the reqId straight into markup and into an inline onclick="..." string -
+    // a quote or apostrophe in either would break out of the attribute.
+    const card = document.createElement('div');
+    card.id = 'editReqToast-' + reqId;
+    card.className = 'edit-req-toast';
+
+    const p = document.createElement('p');
+    const icon = document.createElement('i');
+    icon.className = 'fas fa-hand-paper';
+    icon.style.color = 'var(--accent)';
+    const who = document.createElement('b');
+    who.textContent = req.name;
+    const what = document.createElement('b');
+    what.style.color = 'var(--accent)';
+    what.textContent = MAGNET_SHIELD_LABELS[req.stage] || req.stage;
+    p.appendChild(icon);
+    p.appendChild(document.createTextNode(' '));
+    p.appendChild(who);
+    p.appendChild(document.createTextNode(' is asking to edit '));
+    p.appendChild(what);
+    p.appendChild(document.createTextNode('.'));
+
+    const actions = document.createElement('div');
+    actions.className = 'edit-req-toast-actions';
+    const allowBtn = document.createElement('button');
+    allowBtn.className = 'btn';
+    allowBtn.textContent = 'Allow';
+    allowBtn.onclick = () => respondToEditRequest(reqId, true);
+    const denyBtn = document.createElement('button');
+    denyBtn.className = 'btn-secondary';
+    denyBtn.textContent = 'Deny';
+    denyBtn.onclick = () => respondToEditRequest(reqId, false);
+    actions.appendChild(allowBtn);
+    actions.appendChild(denyBtn);
+
+    card.appendChild(p);
+    card.appendChild(actions);
+    stack.appendChild(card);
+}
+
+function respondToEditRequest(reqId, allow) {
+    const req = window.pendingEditRequests[reqId];
+    if (!req) return;
+    const targetConnection = connections.find(c => c.peer === req.peerId);
+    if (targetConnection && targetConnection.open) {
+        const payload = { type: 'edit-grant', stage: req.stage, allowed: !!allow };
+        // Ship the Host's current content with the grant so the guest lands on the
+        // same file instead of whatever stale copy their own editor happened to hold.
+        if (allow) {
+            if (req.stage === 'codeLayer' && typeof myCodeEditor !== 'undefined' && myCodeEditor) payload.code = myCodeEditor.getValue();
+            if (req.stage === 'markdownLayer') { const mi = document.getElementById('mdInput'); if (mi) payload.text = mi.value; }
+            payload.tabName = (typeof currentTabName === 'function') ? currentTabName(req.stage) : '';
+        }
+        targetConnection.send(JSON.stringify(payload));
+    }
+    logSystemMsg(allow
+        ? `You granted ${req.name} edit access to ${MAGNET_SHIELD_LABELS[req.stage] || req.stage}.`
+        : `You denied ${req.name}'s request to edit ${MAGNET_SHIELD_LABELS[req.stage] || req.stage}.`);
+    delete window.pendingEditRequests[reqId];
+    const toast = document.getElementById('editReqToast-' + reqId);
+    if (toast) toast.remove();
+}
+
+function updateMagnetView(hostStage) {
+    const wrap = document.getElementById('magnetLayer');
+    if (!wrap) return;
+
+    const canvasWrap = document.getElementById('magnetCanvasWrap');
+    const videoWrap = document.getElementById('magnetVideoWrap');
+    const mediaWrap = document.getElementById('magnetMediaWrap');
+    const screenWrap = document.getElementById('magnetScreenWrap');
+    const idleCard = document.getElementById('magnetIdleCard');
+    const infoCard = document.getElementById('magnetInfoCard');
+    const infoText = document.getElementById('magnetInfoText');
+    const statusEl = document.getElementById('magnetStatusText');
+
+    const hide = el => { if (el) el.style.display = 'none'; };
+    hide(canvasWrap); hide(videoWrap); hide(mediaWrap); hide(screenWrap); hide(idleCard); hide(infoCard);
+    hide(document.getElementById('magnetCodeWrap'));
+    hide(document.getElementById('magnetDocWrap'));
+    hideMagnetEditRequestBtn();
+
+    if (!window.isGuestMagnetized && !isHost) {
+        if (statusEl) statusEl.textContent = 'Host is not presenting';
+        if (idleCard) idleCard.style.display = 'flex';
+        return;
+    }
+    if (isHost) {
+        if (statusEl) statusEl.textContent = window.magnetMode ? 'You are presenting (Magnet ON)' : 'Magnet is off';
+        if (idleCard) idleCard.style.display = 'flex';
+        return;
+    }
+
+    if (statusEl) statusEl.textContent = 'Host is presenting ' + (MAGNET_STAGE_LABELS[hostStage] || 'their screen');
+
+    if (hostStage === 'whiteboardLayer') {
+        if (canvasWrap) canvasWrap.style.display = 'block';
+        resizeMagnetCanvas();
+    } else if (hostStage === 'youtubeLayer') {
+        if (videoWrap) videoWrap.style.display = 'block';
+    } else if (hostStage === 'codeLayer') {
+        const w = document.getElementById('magnetCodeWrap');
+        if (w) w.style.display = 'flex';   // flex column: header + split panes
+        showMagnetEditRequestBtn('codeLayer');
+    } else if (hostStage === 'markdownLayer') {
+        const w = document.getElementById('magnetDocWrap');
+        if (w) w.style.display = 'flex';
+        showMagnetEditRequestBtn('markdownLayer');
+    } else if (hostStage === 'mediaLayer') {
+        if (mediaWrap) mediaWrap.style.display = 'block';
+    } else if (hostStage === 'screenLayer') {
+        const screenWrap = document.getElementById('magnetScreenWrap');
+        if (screenWrap) screenWrap.style.display = 'block';
+    } else {
+        if (infoCard) infoCard.style.display = 'flex';
+        if (infoText) infoText.textContent = 'The Host is on ' + (MAGNET_STAGE_LABELS[hostStage] || 'another screen') + '. Opening it for you...';
+    }
 }
 
 function handleYtSync(c, hostTime) { 

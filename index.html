@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Ultimate Collaborative Platform - 3D Master Edition</title>
     
     <!-- Google Fonts for Luxury Aesthetic -->
@@ -218,12 +218,19 @@
         <div class="video-avatar">
             <div class="voice-pulse pulse-anim"><i class="fas fa-microphone"></i></div>
         </div>
+        <div class="video-name-tag" id="name-local">You</div>
     </div>
 </div>
 
 
         <div id="screenLayer" class="stage-container">
-                <video id="sharedScreenVideo" autoplay playsinline style="width:100%; height:100%; object-fit:contain;"></video>
+                <div id="screenShareBox" style="position:relative; width:100%; height:100%; background:#000;">
+                    <video id="sharedScreenVideo" autoplay playsinline style="width:100%; height:100%; object-fit:contain;"></video>
+<!-- Fullscreen for the shared screen, available to the Host and every guest.
+     Uses our own control rather than the video element's native one, which iOS
+     hides for inline video. -->
+                    <button id="screenFsBtn" onclick="toggleScreenShareFullscreen()" title="Fullscreen" style="position:absolute; bottom:14px; right:14px; z-index:30; background:rgba(0,0,0,0.82); color:#fff; border:1px solid #333; padding:9px 13px; border-radius:4px; cursor:pointer;"><i class="fas fa-expand"></i></button>
+                </div>
             </div>
             
             <!-- WHITEBOARD WITH ALL 7 BRUSHES -->
@@ -268,6 +275,9 @@
                             <span style="color:var(--accent); font-weight:bold; letter-spacing:2px; font-family:'Cinzel',serif;"><i class="fas fa-code"></i> Development</span>
                             <button class="btn" style="padding: 8px 20px; font-size: 0.75rem;" onclick="runCode()"><i class="fas fa-play"></i> Run Code</button>
                         </div>
+<!-- Tab strip. Each person's tabs are their own; tab count is capped so one
+     user can't spawn hundreds of editors and exhaust the browser's memory. -->
+                        <div id="codeTabBar" class="editor-tab-bar"></div>
                         <div style="flex:1; overflow:hidden; position:relative;">
                             <textarea id="codeEditorArea"></textarea>
                         </div>
@@ -275,7 +285,7 @@
                     
                     <!-- Right Side: Live Preview (Forced 50%) -->
                     <div class="code-output-pane" style="flex: 1; min-width: 0; width: 50%; background:#fff; height:100%;">
-                        <iframe id="codeOutput" style="width:100%; height:100%; border:none;"></iframe>
+                        <iframe id="codeOutput" sandbox="allow-scripts allow-modals" style="width:100%; height:100%; border:none; background:#fff;"></iframe>
                     </div>
                     
                 </div>
@@ -288,6 +298,7 @@
                         <span style="color:var(--accent); font-weight:bold; letter-spacing:2px; font-family:'Cinzel',serif;"><i class="fab fa-markdown"></i> Markdown Studio</span>
                         <button class="btn" style="padding: 8px 20px; font-size: 0.75rem;" onclick="exportMarkdown()"><i class="fas fa-file-export"></i> Export HTML</button>
                     </div>
+                    <div id="mdTabBar" class="editor-tab-bar"></div>
                     <div class="md-container">
                         <div class="md-pane"><textarea id="mdInput" placeholder="# Documentation Notes..."></textarea></div>
                         <div class="md-pane"><div id="mdOutput"></div></div>
@@ -310,13 +321,125 @@
                         <span style="color:#888; font-size:0.8rem; align-self:center; letter-spacing:1px;">Use Fallback if blocked by security rules.</span>
                         <a id="externalLinkBtn" href="#" target="_blank" class="btn-secondary" style="padding: 8px 20px; text-decoration: none; font-size: 0.75rem;">New Tab Default</a>
                     </div>
-                    <iframe id="sharedBrowser" sandbox="allow-same-origin allow-scripts allow-forms allow-popups" style="flex:1; border:none; width:100%; height:100%; background:white;"></iframe>
+<!-- Sites that send X-Frame-Options / frame-ancestors (Google, YouTube, most
+     banks and news sites) are blocked by the browser itself and render blank
+     here. Nothing client-side can override that, so point at the escape hatch. -->
+                    <div id="browserBlockedNotice" style="display:none; position:absolute; bottom:14px; left:50%; transform:translateX(-50%); z-index:40; background:rgba(5,5,5,0.95); border:1px solid var(--border-color); border-radius:4px; padding:10px 16px; color:#bbb; font-size:0.72rem; max-width:90%; text-align:center; line-height:1.5;">
+                        Blank page? That site blocks being embedded - use <b style="color:var(--accent);">New Tab</b> above.
+                    </div>
+                    <iframe id="sharedBrowser" sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" style="flex:1; border:none; width:100%; height:100%; background:white;"></iframe>
                 </div>
             </div>
             
+<!-- ==========================================
+     HOST SCREEN (MAGNET MIRROR)
+     Everything the Host broadcasts while Magnet Mode is on renders in HERE, on
+     its own canvas and its own video player. That's what keeps a guest's own
+     whiteboard, code, documents and video from being overwritten by the Host.
+     ========================================== -->
+          <div id="magnetLayer" class="stage-container">
+                <div class="media-box" style="border:none; position:relative; background:#000; flex-direction:column;">
+                    <div id="magnetStatusBar" style="position:absolute; top:8px; left:8px; z-index:45; background:rgba(5,5,5,0.9); border:1px solid var(--accent); border-radius:4px; padding:7px 13px; color:var(--accent); font-size:0.72rem; letter-spacing:1px; text-transform:uppercase; max-width:calc(100% - 16px); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                        <i class="fas fa-magnet"></i> <span id="magnetStatusText">Host is not presenting</span>
+                    </div>
+
+                    <div id="magnetCanvasWrap" style="display:none; width:100%; height:100%;">
+                        <canvas id="magnetCanvas" style="background:#0a0a0a; width:100%; height:100%; touch-action:none;"></canvas>
+                    </div>
+
+                    <div id="magnetVideoWrap" style="display:none; width:100%; height:100%; position:relative;">
+                        <div id="magnetYtPlayer" style="width:100%; height:100%;"></div>
+
+<!-- Transparent shield over the mirrored video. The Host controls playback while
+     presenting, so a guest's clicks must not reach YouTube's own pause/seek/next
+     controls underneath. The guest still gets their OWN volume, captions and
+     fullscreen, which are purely local and don't desync anyone. -->
+                        <div id="magnetYtShield" style="position:absolute; top:0; left:0; width:100%; height:100%; z-index:55;">
+                            <div style="position:absolute; top:0; left:0; width:100%; height:100%; background:transparent;"></div>
+                            <div onclick="ensureMagnetAudioActive()" style="position:absolute; bottom:14px; right:14px; display:flex; gap:8px; z-index:60;">
+                                <button onclick="event.stopPropagation(); magnetToggleCC();" style="background:rgba(0,0,0,0.82); color:#fff; border:1px solid #333; padding:8px 12px; border-radius:4px; cursor:pointer;" title="Subtitles"><i class="fas fa-closed-captioning"></i></button>
+                                <button id="magnetVolBtn" onclick="event.stopPropagation(); magnetToggleVolume();" style="background:rgba(0,0,0,0.82); color:#fff; border:1px solid #333; padding:8px 12px; border-radius:4px; cursor:pointer;" title="Mute/Unmute"><i class="fas fa-volume-mute"></i></button>
+                                <input id="magnetVolSlider" type="range" min="0" max="100" value="100" oninput="event.stopPropagation(); magnetSetVolume(this.value);" style="width:80px; accent-color:var(--accent); cursor:pointer;" title="Volume">
+                                <button onclick="event.stopPropagation(); magnetToggleFullscreen();" style="background:rgba(0,0,0,0.82); color:#fff; border:1px solid #333; padding:8px 12px; border-radius:4px; cursor:pointer;" title="Fullscreen"><i class="fas fa-expand"></i></button>
+                            </div>
+                        </div>
+                    </div>
+
+<!-- Read-only mirrors of the Host's Development editor and Document. The guest's
+     OWN editor and document are separate files that stay exactly as they left
+     them - the Host's version only ever appears here. -->
+<!-- FIX: these used to be a single black text pane, which looked nothing like
+     what the Host actually sees. Both now reproduce the Host's real split view -
+     source on the left, live rendered output on the right - so the mirror is a
+     true picture of their screen rather than a raw text dump. -->
+                    <div id="magnetCodeWrap" style="display:none; width:100%; height:100%; flex-direction:column; box-sizing:border-box; background:#0d0d0d;">
+                        <div style="padding:8px 14px; border-bottom:1px solid #222; color:#888; font-size:0.68rem; letter-spacing:1px; text-transform:uppercase; flex:0 0 auto;"><i class="fas fa-code"></i> <span id="magnetCodeTabName">Host's file</span></div>
+                        <div class="magnet-split">
+                            <div class="magnet-split-pane"><pre id="magnetCodeMirror"></pre></div>
+                            <div class="magnet-split-pane magnet-split-preview"><iframe id="magnetCodePreview" sandbox="allow-scripts" style="width:100%; height:100%; border:none; background:#fff;"></iframe></div>
+                        </div>
+                    </div>
+
+                    <div id="magnetDocWrap" style="display:none; width:100%; height:100%; flex-direction:column; box-sizing:border-box; background:#0d0d0d;">
+                        <div style="padding:8px 14px; border-bottom:1px solid #222; color:#888; font-size:0.68rem; letter-spacing:1px; text-transform:uppercase; flex:0 0 auto;"><i class="fab fa-markdown"></i> <span id="magnetDocTabName">Host's document</span></div>
+                        <div class="magnet-split">
+                            <div class="magnet-split-pane"><pre id="magnetDocSource"></pre></div>
+                            <div class="magnet-split-pane magnet-split-preview"><div id="magnetDocMirror" class="md-preview-surface"></div></div>
+                        </div>
+                    </div>
+
+<!-- Mirror of a file the Host has privately open via "Open File". Read-only,
+     and this never touches the shared Resource Cabinet - only "Send to Room" does. -->
+                    <div id="magnetMediaWrap" style="display:none; width:100%; height:100%;">
+                        <div id="magnetMediaContainer" style="width:100%; height:100%; display:flex; align-items:center; justify-content:center;"></div>
+                    </div>
+
+<!-- Mirrors the Host's live screen share, so it shows up inside the guest's
+     Host Screen app instead of forcibly yanking them off what they're doing. -->
+                    <div id="magnetScreenWrap" style="display:none; width:100%; height:100%;">
+                        <video id="magnetScreenVideo" autoplay playsinline muted style="width:100%; height:100%; object-fit:contain;"></video>
+                    </div>
+
+                    <div id="magnetIdleCard" style="display:flex; width:100%; height:100%; align-items:center; justify-content:center; flex-direction:column; color:#666; text-align:center; padding:20px; box-sizing:border-box;">
+                        <i class="fas fa-magnet" style="font-size:2.4rem; margin-bottom:14px; opacity:0.4;"></i>
+                        <p style="font-size:0.85rem; margin:0 0 6px 0; color:#999;">Nothing is being presented right now.</p>
+                        <p style="font-size:0.72rem; margin:0; line-height:1.5; max-width:340px;">When the Host turns on Magnet Mode, whatever they're showing appears here - safely separate from your own work.</p>
+                    </div>
+
+                    <div id="magnetInfoCard" style="display:none; width:100%; height:100%; align-items:center; justify-content:center; flex-direction:column; color:#888; text-align:center; padding:20px; box-sizing:border-box;">
+                        <i class="fas fa-desktop" style="font-size:2.2rem; margin-bottom:14px; opacity:0.5;"></i>
+                        <p id="magnetInfoText" style="font-size:0.8rem; margin:0; line-height:1.5; max-width:340px;"></p>
+                    </div>
+                </div>
+            </div>
+
           <div id="youtubeLayer" class="stage-container">
-                <div class="media-box" style="border:none; position:relative; background:#000;">
+                <div class="media-box" style="border:none; position:relative; background:#000; flex-direction:column; padding:0;">
+<!-- FIX: this used to float on TOP of the player with position:absolute, sitting
+     directly over YouTube's own title bar and CC/settings/fullscreen controls -
+     you couldn't reach either the input or the video's own controls underneath
+     it. It's now a normal docked strip that takes its own space, so the player
+     is genuinely full-size in the area below it, not obscured. -->
+                    <div id="ytControlsBar" style="position:relative; flex:0 0 auto; width:100%; box-sizing:border-box; z-index:45; display:flex; gap:8px; padding:10px; background:#0a0a0a; border-bottom:1px solid #222;">
+                        <input type="text" id="ytInput" placeholder="Paste a YouTube link..." style="flex:1; min-width:0; padding:10px 12px; background:rgba(5,5,5,0.92); color:white; border:1px solid #333; border-radius:4px; outline:none; font-family:monospace; font-size:0.8rem;" onkeydown="if(event.key==='Enter'){event.preventDefault(); triggerYouTubeSync();}">
+                        <button class="btn" style="padding:0 16px; font-size:0.8rem; flex:0 0 auto;" onclick="triggerYouTubeSync()" title="Play"><i class="fas fa-play"></i></button>
+                    </div>
+
+                    <div style="position:relative; flex:1 1 auto; width:100%; min-height:0;">
                     <div id="ytPlayer" data-initial-vid="" data-initial-time="0"></div>
+
+<!-- Shown when YouTube refuses a video, so the reason is visible instead of just
+     YouTube's bare "This video is unavailable" wall. -->
+                    <div id="ytErrorCard" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; z-index:44; background:rgba(0,0,0,0.94); align-items:center; justify-content:center; flex-direction:column; text-align:center; padding:24px; box-sizing:border-box;">
+                        <button onclick="hideYtError()" title="Close" style="position:absolute; top:10px; right:14px; background:transparent; border:none; color:#888; font-size:1.2rem; cursor:pointer;"><i class="fas fa-times"></i></button>
+                        <i class="fab fa-youtube" style="font-size:2.6rem; color:var(--accent); margin-bottom:14px;"></i>
+                        <p id="ytErrorText" style="color:#ddd; font-size:0.9rem; margin:0 0 6px 0; max-width:420px; line-height:1.5;"></p>
+                        <p style="color:#777; font-size:0.72rem; margin:0 0 16px 0; max-width:420px; line-height:1.5;">This restriction is set by the uploader and enforced by YouTube itself, so no website can embed the video. You can still paste another link in the bar above.</p>
+                        <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;">
+                            <a id="ytErrorLink" href="#" target="_blank" rel="noopener noreferrer" class="btn" style="display:inline-block; text-decoration:none; font-size:0.8rem; padding:10px 20px;">Watch on YouTube</a>
+                            <button id="ytErrorAltBtn" class="btn-secondary" style="font-size:0.8rem; padding:10px 20px;" onclick="tryAlternateYtPlayer()">Try alternate player</button>
+                        </div>
+                    </div>
 <!-- LOADING OVERLAY: covers the player with a dark background + spinner while the
      YouTube iframe boots up, instead of letting the iframe's own white flash show
      through (this was the "white screen first on mobile" issue). Shown by
@@ -343,6 +466,7 @@
                             </button>
                         </div>
                     </div>
+                    </div><!-- /player+error wrapper -->
 </div>
             </div>
             
@@ -481,9 +605,15 @@
                     <div class="app-item" onclick="switchMainStage('markdownLayer')"><i class="fab fa-markdown"></i>Document</div>
                     <div class="app-item" onclick="switchMainStage('gameLayer')"><i class="fas fa-chess-knight"></i>Recreation</div>
                     
+                    <div class="app-item" id="magnetAppTile" onclick="openMagnetScreen()"><i class="fas fa-magnet"></i>Host Screen</div>
                     <div class="app-item" onclick="openDirectYouTube()"><i class="fab fa-youtube"></i>YouTube</div>
                     
-                    <div class="app-item" onclick="document.getElementById('fileUpload').click()"><i class="fas fa-folder-open"></i>Distribute</div>
+<!-- Opens a file for YOU only - nothing is broadcast, nothing is filed in the
+     shared Resource Cabinet. -->
+                    <div class="app-item" onclick="document.getElementById('fileUpload').click()"><i class="fas fa-folder-open"></i>Open File</div>
+<!-- Host only (hidden for guests): deliberately pushes a file to everyone AND
+     files it in the shared Resource Cabinet. -->
+                    <div class="app-item" id="hostShareTile" style="display:none; border-color:var(--accent); color:var(--accent);" onclick="document.getElementById('fileShareUpload').click()"><i class="fas fa-paper-plane"></i>Send to Room</div>
                                     </div>
                 
                 <div id="globalFileProgressWrapper" style="display:none; margin-top:25px; padding:15px; background:#0a0a0a; border:1px solid var(--border-color); border-radius:2px;">
@@ -495,7 +625,8 @@
                         <div id="fileProgressFill" style="height:100%; background:var(--accent); width:0%; transition: width 0.1s;"></div>
                     </div>
                 </div>
-                <input type="file" id="fileUpload" style="display:none;" onchange="handleChunkedFileUpload(event)">
+                <input type="file" id="fileUpload" style="display:none;" onchange="handlePrivateFileOpen(event)">
+                <input type="file" id="fileShareUpload" style="display:none;" onchange="handleChunkedFileUpload(event)">
                 
                 <div style="margin-top:25px; background:#0a0a0a; padding:20px; border-radius:2px; border:1px solid var(--border-color);">
                     <div id="hostTimerControls" style="display:none; margin-bottom:25px; border-bottom:1px solid var(--border-color); padding-bottom:20px;">
@@ -510,22 +641,6 @@
                     <div id="hostMediaControls" style="display:none;">
                         <p style="color:var(--accent); font-size:0.8rem; margin-bottom: 10px; letter-spacing:2px; text-transform:uppercase;">Custom Media Embeds</p>
 
-                        <div style="display:flex; gap:8px; margin-bottom:8px;">
-                            <input type="text" id="ytSearchInput" placeholder="Search YouTube by name..." style="flex:1; min-width:0; padding:12px; background:#050505; color:white; border: 1px solid #333; border-radius: 2px; outline:none; font-family:monospace;" onkeydown="if(event.key==='Enter'){event.preventDefault(); searchYouTube();}">
-                            <button class="btn-secondary" style="padding:0 16px; font-size:0.8rem;" onclick="searchYouTube()" title="Search"><i class="fas fa-search"></i></button>
-                        </div>
-                        <div id="ytSearchResults" style="display:none; max-height:240px; overflow-y:auto; margin-bottom:10px; border:1px solid #333; border-radius:2px; background:#050505;"></div>
-
-                        <details style="margin-bottom:15px;">
-                            <summary style="color:#888; font-size:0.7rem; cursor:pointer; letter-spacing:1px; text-transform:uppercase;">YouTube Search API Key (needed for search)</summary>
-                            <input type="text" id="ytApiKeyInput" placeholder="Paste your YouTube Data API v3 key" style="width:100%; padding:10px; margin-top:8px; background:#050505; color:white; border: 1px solid #333; border-radius: 2px; outline:none; font-family:monospace; font-size:0.75rem; box-sizing:border-box;" onchange="saveYtApiKey()">
-                            <p style="color:#666; font-size:0.65rem; margin-top:6px; line-height:1.4;">Only needed to search by name - pasting a direct link/ID below never needs a key. Get a free key from the Google Cloud Console (enable "YouTube Data API v3"). It's saved only in your own browser, never sent to our server.</p>
-                        </details>
-
-                        <p style="color:#666; font-size:0.7rem; margin-bottom:8px;">...or paste a direct link/ID:</p>
-                        <input type="text" id="ytInput" placeholder="YouTube Video ID or Link" style="width:100%; padding:12px; margin-bottom:10px; background:#050505; color:white; border: 1px solid #333; border-radius: 2px; outline:none; font-family:monospace;">
-                        <button class="btn" style="width:100%; margin-bottom:25px; font-size:0.8rem;" onclick="triggerYouTubeSync()">Broadcast YT Video</button>
-                        
                         <input type="text" id="browserInput" placeholder="Website URL" style="width:100%; padding:12px; margin-bottom:10px; background:#050505; color:white; border: 1px solid #333; border-radius: 2px; outline:none; font-family:monospace;">
                         <button class="btn-secondary" style="width:100%; font-size:0.8rem;" onclick="triggerWebBrowser()">Render Custom Webpage</button>
                     </div>

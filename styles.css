@@ -313,7 +313,11 @@ body.theme-space .layer-space { display: block; }
    ========================================= */
 #screenLayer.active-stage, #youtubeLayer.active-stage, #browserLayer.active-stage, 
 #soundcloudLayer.active-stage, #gameLayer.active-stage, #soundboardLayer.active-stage, 
-#codeLayer.active-stage, #markdownLayer.active-stage, #quizLayer.active-stage, #mediaLayer.active-stage { 
+#codeLayer.active-stage, #markdownLayer.active-stage, #quizLayer.active-stage, #mediaLayer.active-stage,
+/* FIX: #magnetLayer was missing from this list, so .stage-container's
+   display:none was never overridden - the Host Screen tab opened as an empty
+   black area and no mirrored content could ever be seen. */
+#magnetLayer.active-stage { 
     display: flex; align-items: center; justify-content: center; z-index: 20; background: transparent; 
 }
 
@@ -1134,3 +1138,355 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 
 #mobileDrawerBtn, #topBarToggleBtn { flex-shrink: 0; }
+
+/* ==========================================
+   HOST SCREEN (MAGNET MIRROR) + CROSS-PLATFORM HARDENING
+   ========================================== */
+#magnetLayer .media-box { width: 100%; height: 100%; }
+#magnetCanvasWrap, #magnetVideoWrap { position: relative; }
+#magnetYtPlayer, #magnetYtPlayer iframe {
+    width: 100% !important;
+    height: 100% !important;
+    border: 0;
+    background: #000;
+}
+/* The mirror is read-only - guests watch the Host here, they don't draw on it. */
+#magnetCanvas { pointer-events: none; }
+
+/* iOS + Android: stop double-tap zoom and long-press callouts from stealing
+   taps on controls. */
+button, .app-item, .wb-btn, .top-controls button {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+@media screen and (max-width: 850px) {
+    /* iOS Safari force-zooms the whole page whenever a focused input's font is
+       under 16px, and never zooms back out - which is what leaves the layout
+       shifted and cut off after typing. 16px is the documented threshold. */
+    input, textarea, select { font-size: 16px !important; }
+
+    /* Keep the fixed bottom control dock above the iPhone home indicator. */
+    @supports (padding: max(0px)) {
+        #topControlsWrapper { bottom: max(20px, env(safe-area-inset-bottom)) !important; }
+    }
+}
+
+/* ==========================================
+   LANDSCAPE / SHORT-HEIGHT PHONES
+   The mobile breakpoints key off WIDTH only, so a phone in landscape
+   (700-930px wide - past the 850px cutoff) skipped every mobile fix and got
+   the desktop layout squeezed into ~350-450px of height.
+   ========================================== */
+@media screen and (max-height: 500px) and (orientation: landscape) {
+    .stage-container { padding-top: 60px; }
+    #topControlsWrapper {
+        position: fixed; bottom: 8px; top: auto !important;
+        left: 50%; transform: translateX(-50%);
+        width: max-content; max-width: 96vw; z-index: 9999;
+    }
+    .top-controls {
+        padding: 8px 14px; gap: 10px; flex-wrap: nowrap !important;
+        overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap;
+    }
+    .top-controls::-webkit-scrollbar { display: none; }
+    .top-controls button { width: 36px; height: 36px; font-size: 0.95rem; flex-shrink: 0; }
+    #topBarToggleBtn { display: none; }
+    .wb-toolbar { top: 52px !important; }
+    #whiteboardLayer { padding-top: 96px; }
+    #videoLayer.video-grid-full { padding: 55px 10px 10px 10px !important; }
+    .video-grid-full .video-wrapper { max-height: calc(100dvh - 70px) !important; aspect-ratio: 16 / 9; }
+}
+
+/* Host Screen mirror panes: read-only views of the Host's code and document. */
+#magnetCodeWrap, #magnetDocWrap { -webkit-overflow-scrolling: touch; }
+#magnetCodeMirror, #magnetDocMirror { user-select: text; -webkit-user-select: text; }
+#magnetDocMirror img { max-width: 100%; height: auto; }
+#magnetDocMirror pre { white-space: pre-wrap; word-break: break-word; }
+#browserLayer { position: relative; }
+
+/* ==========================================
+   MAGNET INTERFERENCE SHIELD (Development / Document / Canvas)
+   Blocks a guest's clicks & keystrokes on the Host's live shared apps until
+   the Host grants that specific guest edit access.
+   ========================================== */
+/* FIX: this used to be a dark, blurred, full-screen card that buried the very
+   thing the guest was supposed to be watching. The shield is now fully
+   TRANSPARENT - it still swallows clicks and keystrokes so a guest can't
+   interrupt the Host - and the only visible part is a small pill in the corner
+   that they can ignore entirely if they just want to watch. */
+.magnet-shield {
+    display: none;
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 55;
+    align-items: flex-end; justify-content: flex-end;
+    background: transparent;
+    pointer-events: auto;
+}
+.magnet-shield-card {
+    background: rgba(10, 0, 0, 0.88); border: 1px solid var(--accent); border-radius: 30px;
+    padding: 7px 8px 7px 14px; text-align: left; color: #ddd;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.6);
+    display: flex; align-items: center; gap: 10px;
+    margin: 0 16px 16px 0; max-width: calc(100% - 32px);
+}
+.magnet-shield-card > i.fa-lock {
+    font-size: 0.8rem; color: var(--accent); display: block; flex: 0 0 auto;
+}
+.magnet-shield-title { font-size: 0.72rem; margin: 0; color: #bbb; line-height: 1.3; white-space: nowrap; }
+.magnet-shield-app { color: var(--accent); font-weight: bold; }
+/* The long explanatory line is redundant once this is a small pill. */
+.magnet-shield-sub { display: none; }
+.magnet-shield-btn { width: auto; font-size: 0.68rem; padding: 7px 14px; border-radius: 30px; white-space: nowrap; flex: 0 0 auto; }
+.magnet-shield-status { font-size: 0.65rem; color: var(--accent); margin: 0; letter-spacing: 0.5px; white-space: nowrap; }
+.magnet-shield-status:empty { display: none; }
+
+@media screen and (max-width: 600px) {
+    /* On a phone the label would push the button off-screen. */
+    .magnet-shield-title { display: none; }
+    .magnet-shield-card { margin: 0 10px 10px 0; padding: 6px; }
+}
+
+/* Host-side toast stack for incoming "guest wants to edit X" requests */
+#editRequestToastStack {
+    position: fixed; top: 20px; right: 20px; z-index: 6000;
+    display: flex; flex-direction: column; gap: 10px; max-width: 300px;
+}
+.edit-req-toast {
+    background: rgba(10, 0, 0, 0.96); border: 1px solid var(--accent); border-radius: 6px;
+    padding: 14px 16px; color: #ddd; font-size: 0.78rem;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    animation: editReqToastIn 0.2s ease-out;
+}
+.edit-req-toast p { margin: 0 0 10px 0; line-height: 1.5; }
+.edit-req-toast-actions { display: flex; gap: 8px; }
+.edit-req-toast-actions .btn, .edit-req-toast-actions .btn-secondary {
+    flex: 1; padding: 8px; font-size: 0.72rem;
+}
+@keyframes editReqToastIn {
+    from { opacity: 0; transform: translateX(20px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+@media screen and (max-width: 850px) {
+    #editRequestToastStack { left: 12px; right: 12px; top: 12px; max-width: none; }
+}
+
+/* ==========================================
+   EDITOR TABS (Development + Document)
+   Per-person file tabs. Horizontally scrollable so a full set of tabs never
+   pushes the "New" button off-screen on a phone.
+   ========================================== */
+.editor-tab-bar {
+    display: flex; align-items: stretch; gap: 4px;
+    background: #060606; border-bottom: 1px solid var(--border-color);
+    padding: 6px 8px; overflow-x: auto; overflow-y: hidden;
+    flex: 0 0 auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.editor-tab-bar::-webkit-scrollbar { display: none; }
+.editor-tab {
+    display: flex; align-items: center; gap: 6px;
+    background: #111; border: 1px solid #262626; border-radius: 4px;
+    padding: 5px 8px 5px 10px; flex: 0 0 auto; max-width: 180px;
+}
+.editor-tab.active { border-color: var(--accent); background: rgba(230,0,0,0.12); }
+.editor-tab-label {
+    color: #bbb; font-size: 0.7rem; font-family: monospace; cursor: pointer;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px;
+}
+.editor-tab.active .editor-tab-label { color: #fff; }
+.editor-tab-close {
+    background: transparent; border: none; color: #777; cursor: pointer;
+    font-size: 0.95rem; line-height: 1; padding: 0 2px; flex: 0 0 auto;
+}
+.editor-tab-close:hover { color: var(--accent); }
+.editor-tab-add {
+    background: transparent; border: 1px dashed #333; border-radius: 4px;
+    color: #888; font-size: 0.68rem; padding: 5px 12px; cursor: pointer;
+    flex: 0 0 auto; white-space: nowrap;
+}
+.editor-tab-add:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+.editor-tab-add:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* The Document pane is a flex column; the tab bar must not stretch. */
+#markdownLayer .media-box { flex-direction: column; }
+
+/* Host's "you are presenting" reminder. Bottom-left is clear on every stage,
+   and pointer-events:none guarantees it can never swallow a click. */
+.presenting-badge {
+    position: fixed; bottom: 16px; left: 16px; z-index: 9997;
+    background: rgba(10,0,0,0.92); border: 1px solid var(--accent); color: var(--accent);
+    border-radius: 30px; padding: 6px 14px;
+    font-size: 0.66rem; letter-spacing: 1.2px; text-transform: uppercase;
+    pointer-events: none; display: none; max-width: calc(100vw - 32px);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+@media screen and (max-width: 850px) {
+    /* Clear of the mobile control dock, which is fixed to the bottom. */
+    .presenting-badge { bottom: auto; top: 10px; left: 10px; font-size: 0.6rem; padding: 5px 10px; }
+}
+
+/* ==========================================
+   HOST SCREEN SPLIT MIRRORS (Development / Document)
+   Reproduce the Host's real two-pane layout instead of a flat text dump.
+   ========================================== */
+.magnet-split { display: flex; flex: 1 1 auto; min-height: 0; width: 100%; }
+.magnet-split-pane { flex: 1 1 50%; min-width: 0; overflow: auto; -webkit-overflow-scrolling: touch; }
+.magnet-split-pane > pre {
+    margin: 0; padding: 14px; color: #d6d6d6; font-family: monospace;
+    font-size: 0.78rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+}
+.magnet-split-preview { border-left: 1px solid #222; background: #fff; }
+.md-preview-surface { padding: 20px; color: #111; font-size: 0.9rem; line-height: 1.6; min-height: 100%; box-sizing: border-box; }
+.md-preview-surface img { max-width: 100%; height: auto; }
+.md-preview-surface pre { white-space: pre-wrap; word-break: break-word; background: #f4f4f4; padding: 10px; border-radius: 4px; }
+.md-preview-surface table { max-width: 100%; border-collapse: collapse; }
+
+@media screen and (max-width: 850px) {
+    /* Side-by-side panes are unreadable on a phone - stack them. */
+    .magnet-split { flex-direction: column; }
+    .magnet-split-pane { flex: 1 1 50%; }
+    .magnet-split-preview { border-left: none; border-top: 1px solid #222; }
+}
+
+/* ==========================================
+   CROSS-DEVICE PASS
+   ========================================== */
+/* iOS Safari's 100vh includes the collapsing URL bar, so a 100vh element is
+   taller than the visible area and the bottom is cut off. dvh tracks the real
+   viewport; the 100vh line stays first as the fallback for older browsers. */
+html, body { height: 100vh; height: 100dvh; }
+
+/* Tablets sit between the phone and desktop breakpoints and were getting the
+   desktop split panes at an awkward width. */
+@media screen and (min-width: 851px) and (max-width: 1100px) {
+    .media-box { width: 98%; height: 94%; }
+    .magnet-split-pane > pre { font-size: 0.72rem; }
+}
+
+/* Long unbroken strings (pasted URLs, base64) were forcing horizontal page
+   scroll on narrow screens. */
+#chatBox, .md-preview-surface, .editor-tab-label { overflow-wrap: anywhere; }
+
+/* Respect users who ask the OS to reduce motion. */
+@media (prefers-reduced-motion: reduce) {
+    .fa-spin { animation: none !important; }
+}
+
+/* ==========================================
+   VIDEO FRAMING + FLOATING PiP + MOBILE TOOL PLACEMENT
+   ========================================== */
+
+/* FIX (grid zoom): object-fit:cover crops the camera frame to fill the tile,
+   which on a 16:9 tile with a portrait phone camera throws away most of the
+   picture and leaves an extreme face close-up. 'contain' shows the whole frame
+   letterboxed against the tile background instead. */
+.video-wrapper video { object-fit: contain !important; background: #000; }
+/* The floating PiP thumbnails are small, so cropping there is the right call -
+   contain would letterbox them into near-uselessness. */
+.video-grid-floating .video-wrapper video { object-fit: cover !important; }
+
+/* Name tags: always legible, never covering the face. */
+.video-name-tag {
+    position: absolute; bottom: 6px; left: 6px; z-index: 6;
+    background: rgba(0,0,0,0.72); color: #eee;
+    font-size: 0.68rem; letter-spacing: 0.4px;
+    padding: 3px 8px; border-radius: 3px;
+    max-width: calc(100% - 12px); overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; pointer-events: none;
+}
+.video-grid-floating .video-name-tag { font-size: 0.55rem; padding: 2px 5px; bottom: 3px; left: 3px; }
+
+/* FIX (PiP covering things): the floating grid sat at z-index 1000 in the
+   bottom-right, directly over in-stage controls. It now sits top-left, below
+   the control dock's z-index, is semi-transparent until hovered, and never
+   swallows pointer events. */
+#videoLayer.video-grid-floating {
+    top: 74px; left: 14px;
+    bottom: auto; right: auto;
+    z-index: 40;
+    opacity: 0.82;
+    transition: opacity 0.2s ease;
+    max-width: 42vw;
+    pointer-events: none;
+}
+#videoLayer.video-grid-floating:hover { opacity: 1; }
+/* Keep the drag handle usable even though the tiles ignore pointer events. */
+#videoLayer.video-grid-floating { pointer-events: auto; }
+.video-grid-floating .video-wrapper { pointer-events: none; }
+
+/* Active app tile highlight, so it's obvious which app you're looking at. */
+.app-item-active {
+    border-color: var(--accent) !important;
+    background: rgba(230,0,0,0.14) !important;
+    color: var(--accent) !important;
+    position: relative;
+}
+.app-item-active::after {
+    content: 'IN USE';
+    position: absolute; top: 5px; right: 6px;
+    font-size: 0.5rem; letter-spacing: 1px; color: var(--accent); opacity: 0.85;
+}
+
+@media screen and (max-width: 850px) {
+    /* Smaller PiP so it can't dominate a phone screen. */
+    #videoLayer.video-grid-floating {
+        top: 58px; left: 8px; max-width: 34vw; padding: 6px; gap: 6px;
+    }
+    .video-grid-floating .video-wrapper { width: 86px; height: 58px; min-height: 0; }
+
+    /* FIX (canvas tools hidden): the whiteboard toolbar competed with the fixed
+       bottom call dock. The call controls stay exactly where they are - the
+       toolbar moves to its own scrollable strip directly under the PiP instead,
+       clear of both the dock and the video thumbnails. */
+    .wb-toolbar {
+        top: auto !important;
+        bottom: 92px !important;
+        left: 8px !important; right: 8px !important;
+        transform: none !important;
+        width: auto !important;
+        flex-direction: row !important;
+        max-height: none !important;
+        overflow-x: auto !important; overflow-y: visible !important;
+        -webkit-overflow-scrolling: touch;
+        padding: 7px 9px !important;
+        gap: 7px !important;
+        align-items: center;
+        z-index: 8000;
+        background: rgba(10,0,0,0.92);
+        border: 1px solid var(--border-color); border-radius: 8px;
+        scrollbar-width: none;
+    }
+    .wb-toolbar::-webkit-scrollbar { display: none; }
+    .wb-toolbar > div[style*="height:1px"] {
+        width: 1px !important; height: 26px !important; flex: 0 0 1px; margin: 0 3px !important;
+    }
+    .wb-toolbar #wbSizeSlider { width: 80px !important; flex: 0 0 80px; margin: 0 !important; }
+    .wb-toolbar #wbColorPicker { width: 36px !important; flex: 0 0 36px; margin: 0 !important; }
+    .wb-toolbar .wb-btn { flex: 0 0 auto; }
+    #whiteboardLayer { padding-top: 60px; }
+
+    /* In-stage controls lift above the dock too, so nothing is buried. */
+    #ytControlsBar { padding: 8px !important; }
+    #screenFsBtn { bottom: 92px !important; }
+    #magnetYtShield > div:last-child { bottom: 92px !important; }
+    .magnet-shield-card { margin-bottom: 92px !important; }
+    #magnetEditRequestBtn { bottom: 92px !important; }
+}
+
+/* FIX (image 4): passcode / access-code inputs were clipped and unreadable on a
+   phone - no explicit sizing meant they inherited a cramped width and the
+   placeholder ran past the edge. */
+input[type="text"], input[type="password"], input[type="number"], select, textarea {
+    max-width: 100%;
+    box-sizing: border-box;
+}
+@media screen and (max-width: 850px) {
+    #roomPass, #joinPass, #roomIdInput, #roomNameInput,
+    .lobby input, .lobby select, .modal input, .modal select {
+        width: 100% !important;
+        min-height: 48px;
+        font-size: 16px !important;   /* under 16px iOS force-zooms on focus */
+        padding: 12px 14px !important;
+        box-sizing: border-box;
+        text-overflow: ellipsis;
+    }
+}
