@@ -186,19 +186,23 @@ function checkDiagnosticTrigger() {
 // ==========================================
 let topBarHidden = false;
 
+// The call dock (mic / camera / record / leave) can be collapsed on every device,
+// phones included - it used to be desktop-only because the toggle button was
+// display:none'd on mobile, leaving the dock permanently covering the bottom of
+// the screen. Collapsed, it shrinks to just this button so the controls are
+// always one tap away and never lost.
 function toggleTopBar() {
     const controls = document.querySelector('.top-controls');
+    const wrapper = document.getElementById('topControlsWrapper');
     const icon = document.querySelector('#topBarToggleBtn i');
-    
-    if (!topBarHidden) {
-        controls.style.display = 'none';
-        icon.className = 'fas fa-chevron-down';
-        topBarHidden = true;
-    } else {
-        controls.style.display = 'flex';
-        icon.className = 'fas fa-chevron-up';
-        topBarHidden = false;
-    }
+    if (!controls) return;
+
+    topBarHidden = !topBarHidden;
+    controls.style.display = topBarHidden ? 'none' : 'flex';
+    if (wrapper) wrapper.classList.toggle('dock-collapsed', topBarHidden);
+    if (icon) icon.className = topBarHidden ? 'fas fa-chevron-up' : 'fas fa-chevron-down';
+    const btn = document.getElementById('topBarToggleBtn');
+    if (btn) btn.title = topBarHidden ? 'Show controls' : 'Hide controls';
 }
 
 function changeTheme(v) { 
@@ -516,18 +520,79 @@ function magnetSetVolume(v) {
     if (btn) btn.innerHTML = val === 0 ? '<i class="fas fa-volume-mute"></i>' : '<i class="fas fa-volume-up"></i>';
 }
 
-function magnetToggleFullscreen() {
-    const el = document.getElementById('magnetVideoWrap');
+// ==========================================
+// FULLSCREEN
+// The previous version had two dead ends: webkitEnterFullscreen only exists on
+// <video> elements - never on an iframe - so the iOS branch could never fire,
+// and requestFullscreen() returns a promise whose rejection went uncaught, so a
+// refusal produced no feedback and no fallback. This does the reverse: attempt
+// native fullscreen, and if it's unsupported or refused, fall back to a CSS
+// "fill the viewport" mode that behaves identically on every browser, iOS
+// included (where a div can never go truly fullscreen).
+// ==========================================
+function isAnyFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+}
+
+function applyPseudoFullscreen(el, on) {
     if (!el) return;
-    if (!document.fullscreenElement && !document.webkitFullscreenElement) {
-        if (el.requestFullscreen) el.requestFullscreen();
-        else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
-        // iOS Safari won't fullscreen a div; fall back to the iframe's own API.
-        else { const f = el.querySelector('iframe'); if (f && f.webkitEnterFullscreen) f.webkitEnterFullscreen(); }
-    } else {
-        if (document.exitFullscreen) document.exitFullscreen();
+    el.classList.toggle('pseudo-fullscreen', on);
+    document.body.classList.toggle('pseudo-fullscreen-active', on);
+    // Swap expand/compress icons so the button reflects the current state.
+    [['magnetFsBtn', 'magnetVideoWrap'], ['screenFsBtn', 'screenShareBox']].forEach(([btnId, wrapId]) => {
+        if (el.id !== wrapId) return;
+        const i = document.querySelector('#' + btnId + ' i');
+        if (i) i.className = on ? 'fas fa-compress' : 'fas fa-expand';
+    });
+    // The YouTube iframe is sized off its container, so nudge a reflow.
+    window.dispatchEvent(new Event('resize'));
+}
+
+function exitAnyFullscreen(el) {
+    if (isAnyFullscreen()) {
+        if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
         else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
     }
+    applyPseudoFullscreen(el, false);
+}
+
+function toggleElementFullscreen(el) {
+    if (!el) return;
+    const alreadyOn = isAnyFullscreen() || el.classList.contains('pseudo-fullscreen');
+    if (alreadyOn) { exitAnyFullscreen(el); return; }
+
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (req) {
+        try {
+            const r = req.call(el);
+            // Chrome/Firefox return a promise; Safari's webkit variant does not.
+            if (r && typeof r.catch === 'function') r.catch(() => applyPseudoFullscreen(el, true));
+        } catch (e) {
+            applyPseudoFullscreen(el, true);
+        }
+    } else {
+        applyPseudoFullscreen(el, true);
+    }
+}
+
+// Leaving native fullscreen by Esc or the system gesture must also clear our
+// CSS class, otherwise the element stays stuck filling the viewport.
+['fullscreenchange', 'webkitfullscreenchange'].forEach(evt =>
+    document.addEventListener(evt, () => {
+        if (!isAnyFullscreen()) {
+            document.querySelectorAll('.pseudo-fullscreen').forEach(el => applyPseudoFullscreen(el, false));
+        }
+    })
+);
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+        document.querySelectorAll('.pseudo-fullscreen').forEach(el => applyPseudoFullscreen(el, false));
+    }
+});
+
+function magnetToggleFullscreen() {
+    ensureMagnetAudioActive();
+    toggleElementFullscreen(document.getElementById('magnetVideoWrap'));
 }
 
 // --- CUSTOM GUEST CONTROLS (Magnet Mode) ---
@@ -1711,17 +1776,15 @@ window.switchCamera = switchCamera;
 // refuses fullscreen on a <div>, so fall back to the video element's own
 // webkitEnterFullscreen, which it does support.
 function toggleScreenShareFullscreen() {
-    const box = document.getElementById('screenShareBox');
+    // A <video> CAN use iOS's native player, so prefer that on iOS; otherwise use
+    // the shared native/CSS path.
     const vid = document.getElementById('sharedScreenVideo');
-    const inFs = document.fullscreenElement || document.webkitFullscreenElement;
-    if (!inFs) {
-        if (box && box.requestFullscreen) box.requestFullscreen().catch(() => {});
-        else if (box && box.webkitRequestFullscreen) box.webkitRequestFullscreen();
-        else if (vid && vid.webkitEnterFullscreen) vid.webkitEnterFullscreen();
-    } else {
-        if (document.exitFullscreen) document.exitFullscreen();
-        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+    const box = document.getElementById('screenShareBox');
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (isIOS && vid && typeof vid.webkitEnterFullscreen === 'function') {
+        try { vid.webkitEnterFullscreen(); return; } catch (e) { /* fall through */ }
     }
+    toggleElementFullscreen(box);
 }
 
 function stopScreenShare() {

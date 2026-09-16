@@ -736,9 +736,8 @@ body.theme-space .layer-space { display: block; }
         font-size: 1.1rem;
         flex-shrink: 0;
     }
-    #topBarToggleBtn {
-        display: none; /* Hide the toggle button on mobile since it's a fixed dock now */
-    }
+    /* The dock is collapsible on phones too now, so this button must stay. */
+    #topBarToggleBtn { display: inline-flex !important; }
 
     /* 5. Whiteboard Toolbar (Rotate to horizontal at the bottom of the stage) */
     .wb-toolbar {
@@ -1191,7 +1190,7 @@ button, .app-item, .wb-btn, .top-controls button {
     }
     .top-controls::-webkit-scrollbar { display: none; }
     .top-controls button { width: 36px; height: 36px; font-size: 0.95rem; flex-shrink: 0; }
-    #topBarToggleBtn { display: none; }
+    #topBarToggleBtn { display: inline-flex !important; }
     .wb-toolbar { top: 52px !important; }
     #whiteboardLayer { padding-top: 96px; }
     #videoLayer.video-grid-full { padding: 55px 10px 10px 10px !important; }
@@ -1490,3 +1489,44 @@ input[type="text"], input[type="password"], input[type="number"], select, textar
         text-overflow: ellipsis;
     }
 }
+
+/* ==========================================
+   COLLAPSIBLE CALL DOCK + FULLSCREEN FALLBACK
+   ========================================== */
+/* Collapsed, the dock shrinks to just its toggle so it stops covering content
+   while staying one tap from the call controls. */
+#topControlsWrapper.dock-collapsed {
+    background: transparent !important;
+    border-color: transparent !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    width: auto !important;
+    gap: 0 !important;
+}
+#topControlsWrapper.dock-collapsed #topBarToggleBtn {
+    background: var(--accent);
+    color: var(--btn-text);
+    opacity: 0.92;
+}
+#topBarToggleBtn { transition: background 0.2s, opacity 0.2s; }
+
+/* CSS fullscreen fallback - used when native fullscreen is unavailable or
+   refused (notably any <div> on iOS, which can never go truly fullscreen). */
+.pseudo-fullscreen {
+    position: fixed !important;
+    top: 0 !important; left: 0 !important;
+    width: 100vw !important; height: 100vh !important; height: 100dvh !important;
+    max-width: none !important; max-height: none !important;
+    margin: 0 !important; border-radius: 0 !important;
+    z-index: 2147483000 !important;
+    background: #000 !important;
+    display: block !important;
+}
+.pseudo-fullscreen iframe, .pseudo-fullscreen video, .pseudo-fullscreen > div {
+    width: 100% !important; height: 100% !important;
+}
+body.pseudo-fullscreen-active { overflow: hidden !important; }
+/* Keep the dock reachable so there's always a way back out. */
+body.pseudo-fullscreen-active #topControlsWrapper { z-index: 2147483001 !important; }
+/* The shield's controls must stay on top of the expanded player. */
+.pseudo-fullscreen #magnetYtShield { z-index: 2147483002 !important; }

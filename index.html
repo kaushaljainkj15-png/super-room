@@ -360,7 +360,7 @@
                                 <button onclick="event.stopPropagation(); magnetToggleCC();" style="background:rgba(0,0,0,0.82); color:#fff; border:1px solid #333; padding:8px 12px; border-radius:4px; cursor:pointer;" title="Subtitles"><i class="fas fa-closed-captioning"></i></button>
                                 <button id="magnetVolBtn" onclick="event.stopPropagation(); magnetToggleVolume();" style="background:rgba(0,0,0,0.82); color:#fff; border:1px solid #333; padding:8px 12px; border-radius:4px; cursor:pointer;" title="Mute/Unmute"><i class="fas fa-volume-mute"></i></button>
                                 <input id="magnetVolSlider" type="range" min="0" max="100" value="100" oninput="event.stopPropagation(); magnetSetVolume(this.value);" style="width:80px; accent-color:var(--accent); cursor:pointer;" title="Volume">
-                                <button onclick="event.stopPropagation(); magnetToggleFullscreen();" style="background:rgba(0,0,0,0.82); color:#fff; border:1px solid #333; padding:8px 12px; border-radius:4px; cursor:pointer;" title="Fullscreen"><i class="fas fa-expand"></i></button>
+                                <button id="magnetFsBtn" onclick="event.stopPropagation(); magnetToggleFullscreen();" style="background:rgba(0,0,0,0.82); color:#fff; border:1px solid #333; padding:8px 12px; border-radius:4px; cursor:pointer;" title="Fullscreen"><i class="fas fa-expand"></i></button>
                             </div>
                         </div>
                     </div>
