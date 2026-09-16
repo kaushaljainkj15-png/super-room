@@ -478,19 +478,37 @@ function magnetToggleCC() {
     }
 }
 
-function magnetToggleVolume() {
-    if (!magnetYtPlayer || typeof magnetYtPlayer.isMuted !== 'function') return;
+// Remembers a DELIBERATE mute. Without this, ensureMagnetAudioActive() (which
+// runs on CC and fullscreen clicks to hand the phone's volume keys back) would
+// silently un-mute again every time, so mute never stuck - the "sound control"
+// bug. It also used to slam volume back to 100, wiping the chosen level.
+window.magnetUserMuted = false;
+window.magnetLastVolume = 100;
+
+function syncMagnetVolumeUI() {
     const btn = document.getElementById('magnetVolBtn');
     const slider = document.getElementById('magnetVolSlider');
+    if (!magnetYtPlayer || typeof magnetYtPlayer.isMuted !== 'function') return;
+    let muted = true, vol = 0;
+    try { muted = magnetYtPlayer.isMuted(); vol = magnetYtPlayer.getVolume ? magnetYtPlayer.getVolume() : 100; } catch (e) { return; }
+    if (btn) btn.innerHTML = (muted || vol === 0) ? '<i class="fas fa-volume-mute"></i>' : '<i class="fas fa-volume-up"></i>';
+    if (slider) slider.value = muted ? 0 : vol;   // slider used to keep showing the old level while muted
+}
+
+function magnetToggleVolume() {
+    if (!magnetYtPlayer || typeof magnetYtPlayer.isMuted !== 'function') return;
     if (magnetYtPlayer.isMuted()) {
+        window.magnetUserMuted = false;
         magnetYtPlayer.unMute();
-        const v = magnetYtPlayer.getVolume ? magnetYtPlayer.getVolume() : 100;
-        if (slider) slider.value = v;
-        if (btn) btn.innerHTML = '<i class="fas fa-volume-up"></i>';
+        // Restore the level they were last at rather than jumping to full.
+        const restore = window.magnetLastVolume > 0 ? window.magnetLastVolume : 100;
+        try { magnetYtPlayer.setVolume(restore); } catch (e) {}
     } else {
+        window.magnetUserMuted = true;
+        try { window.magnetLastVolume = magnetYtPlayer.getVolume() || 100; } catch (e) {}
         magnetYtPlayer.mute();
-        if (btn) btn.innerHTML = '<i class="fas fa-volume-mute"></i>';
     }
+    syncMagnetVolumeUI();
 }
 
 // MOBILE VOLUME KEYS: a phone's physical volume buttons only control *media*
@@ -499,24 +517,30 @@ function magnetToggleVolume() {
 // do nothing. Unmuting on the guest's first interaction hands the keys back.
 function ensureMagnetAudioActive() {
     if (!magnetYtPlayer || typeof magnetYtPlayer.unMute !== 'function') return;
+    // Never override a mute the user chose themselves.
+    if (window.magnetUserMuted) return;
     try {
         if (magnetYtPlayer.isMuted && magnetYtPlayer.isMuted()) {
             magnetYtPlayer.unMute();
-            magnetYtPlayer.setVolume(100);
-            const btn = document.getElementById('magnetVolBtn');
-            if (btn) btn.innerHTML = '<i class="fas fa-volume-up"></i>';
-            const sl = document.getElementById('magnetVolSlider');
-            if (sl) sl.value = 100;
+            magnetYtPlayer.setVolume(window.magnetLastVolume > 0 ? window.magnetLastVolume : 100);
+            syncMagnetVolumeUI();
         }
     } catch (e) {}
 }
 
 function magnetSetVolume(v) {
     if (!magnetYtPlayer || typeof magnetYtPlayer.setVolume !== 'function') return;
-    const val = parseInt(v, 10);
-    magnetYtPlayer.setVolume(val);
+    const val = Math.max(0, Math.min(100, parseInt(v, 10) || 0));
+    // Dragging the slider is an explicit choice, so it overrides a previous mute.
+    if (val > 0) {
+        window.magnetUserMuted = false;
+        window.magnetLastVolume = val;
+        try { if (magnetYtPlayer.isMuted && magnetYtPlayer.isMuted()) magnetYtPlayer.unMute(); } catch (e) {}
+    } else {
+        window.magnetUserMuted = true;   // dragged to zero == muted, and it must stick
+    }
+    try { magnetYtPlayer.setVolume(val); } catch (e) {}
     const btn = document.getElementById('magnetVolBtn');
-    if (val > 0 && magnetYtPlayer.isMuted && magnetYtPlayer.isMuted()) magnetYtPlayer.unMute();
     if (btn) btn.innerHTML = val === 0 ? '<i class="fas fa-volume-mute"></i>' : '<i class="fas fa-volume-up"></i>';
 }
 
@@ -570,6 +594,17 @@ function toggleElementFullscreen(el) {
         } catch (e) {
             applyPseudoFullscreen(el, true);
         }
+        // SELF-CORRECTING: some mobile browsers accept the call, return no error,
+        // and simply do nothing (iOS in particular resolves requestFullscreen on a
+        // non-video element without ever entering fullscreen). Verify shortly after
+        // and switch to the CSS fallback if nothing actually happened - otherwise
+        // the button looks clickable but has no effect, which is exactly the
+        // symptom being reported.
+        setTimeout(() => {
+            if (!isAnyFullscreen() && !el.classList.contains('pseudo-fullscreen')) {
+                applyPseudoFullscreen(el, true);
+            }
+        }, 350);
     } else {
         applyPseudoFullscreen(el, true);
     }
@@ -1165,6 +1200,7 @@ function updateMembersUI() {
     });
 }
 async function hostRoom() {
+    if (!requireAuth("create a space")) return;
     // 1. INSTANTLY RENDER THE UI (Prevents Black Screen)
     switchView('room');
     switchMainStage('videoLayer');
@@ -1250,9 +1286,16 @@ peer.on('open', id => {
             return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
         };
 
+        // Keep our own copy so we can verify joiners over the data channel,
+        // without the hash needing to be readable from the public room record.
+        window.myRoomPinHash = null;
         hashPIN(roomPin, id).then(hashedPin => {
+            if (roomPin.length > 0) window.myRoomPinHash = hashedPin;
             db.ref('rooms/' + id).set({
                 roomId: id,
+                // Needed by the security rules so only the creator can modify or
+                // delete their own room entry.
+                ownerUid: (auth.currentUser ? auth.currentUser.uid : null),
                 roomName: roomName,
                 topic: roomTopic,
                 hostName: myDisplayName,
@@ -1267,6 +1310,36 @@ peer.on('open', id => {
     });
     
    peer.on('connection', c => {
+        // SECURITY: the passcode used to be verified by the GUEST, by reading the
+        // stored hash out of the public room record. That meant the hash was
+        // readable by anyone, and the check itself ran on the attacker's own
+        // machine - so it could simply be skipped. The Host now verifies it,
+        // which is the only party that can actually refuse the connection, and
+        // the hash no longer needs to be world-readable.
+        if (window.myRoomPinHash) {
+            let verified = false;
+            const denyTimer = setTimeout(() => {
+                if (!verified && c.open) {
+                    c.send(JSON.stringify({ type: 'rejected', msg: 'Incorrect or missing passcode.' }));
+                    setTimeout(() => c.close(), 300);
+                }
+            }, 4000);
+            c.on('data', raw => {
+                if (verified) return;
+                let m; try { m = JSON.parse(raw); } catch (e) { return; }
+                if (m && m.type === 'join-auth') {
+                    if (m.pinHash === window.myRoomPinHash) {
+                        verified = true;
+                        clearTimeout(denyTimer);
+                    } else {
+                        clearTimeout(denyTimer);
+                        c.send(JSON.stringify({ type: 'rejected', msg: 'Incorrect passcode.' }));
+                        setTimeout(() => c.close(), 300);
+                    }
+                }
+            });
+        }
+
         if (roomMembers.length >= maxMembers) { 
             const kick = () => { c.send(JSON.stringify({type: 'kicked'})); setTimeout(() => c.close(), 500); };
             if (c.open) kick(); else c.on('open', kick);
@@ -1326,7 +1399,24 @@ peer.on('open', id => {
     handlePeerCalls();
 }
 
+// SECURITY: signing in only ever toggled the LOBBY's visibility with
+// display:none. Anyone could unhide it from devtools - or just call
+// joinRoom()/hostRoom() straight from the console - and be in a room with no
+// account at all. These are hard gates on the actual entry points.
+// (Client checks stop casual bypass; the Firebase rules at the bottom of this
+// file are what actually enforce it server-side - apply those too.)
+function requireAuth(action) {
+    if (auth.currentUser && auth.currentUser.uid) return true;
+    alert("Please sign in with Google before you " + (action || "continue") + ".");
+    const authSection = document.getElementById('authSection');
+    const roomControls = document.getElementById('roomControls');
+    if (authSection) authSection.style.display = 'block';
+    if (roomControls) roomControls.style.display = 'none';
+    return false;
+}
+
 async function joinRoom() {
+    if (!requireAuth("join a space")) return;
     const targetId = document.getElementById('lobbyJoinId').value.trim().toUpperCase();
     currentRoomHostId = targetId; 
     const enteredPin = document.getElementById('lobbyJoinPin') ? document.getElementById('lobbyJoinPin').value.trim() : '';
@@ -1341,14 +1431,18 @@ async function joinRoom() {
         if (roomSnapshot.exists()) {
           const roomData = roomSnapshot.val();
             
-           // PRIORITY 3: SALTED HASH VALIDATION
+            // Hash locally and hand it to the Host to check. We deliberately no
+            // longer compare against roomData.pin here: a check that runs on the
+            // joiner's own machine can always be bypassed, and reading the hash
+            // required exposing it publicly. The Host is the only party that can
+            // genuinely refuse the connection, so it does the comparing.
             const saltedEnteredPin = enteredPin + "::" + targetId + "::SuperRoomPro";
             const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(saltedEnteredPin));
-            const hashedEnteredPin = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-            
-            if (roomData.isLocked && roomData.pin !== hashedEnteredPin) {
-                alert("Incorrect Passcode! Please enter the correct PIN to join.");
-                return; 
+            window.myJoinPinHash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+
+            if (roomData.isLocked && !enteredPin) {
+                alert("This space is locked. Please enter the passcode.");
+                return;
             }
         }
     } catch(e) {
@@ -1409,6 +1503,9 @@ async function joinRoom() {
         setupDataChannelHandlers(c);
         
         c.on('open', () => { 
+            // Send the passcode hash FIRST so the Host can verify before we're
+            // treated as a member.
+            c.send(JSON.stringify({ type: 'join-auth', pinHash: window.myJoinPinHash || null }));
             c.send(JSON.stringify({type: 'hello', name: myDisplayName, peerId: id, userId: myUserId})); 
             if (localStream && localStream.getVideoTracks()[0]) {
                 c.send(JSON.stringify({type: 'cam-state', state: localStream.getVideoTracks()[0].enabled, peerId: id})); 
@@ -1475,7 +1572,75 @@ function handlePeerCalls() {
     });
 }
 
+// Everything that must be torn down when leaving a room. Previously magnet state
+// was left set, so the "PRESENTING - GUESTS SEE THIS SCREEN" badge followed you
+// back to the home screen, and a stale isGuestMagnetized could shield or lock
+// the next room you joined.
+function resetPresentationState() {
+    window.magnetMode = false;
+    window.isGuestMagnetized = false;
+    window.magnetizedStageId = null;
+    window.myEditPermissions = {};
+    window.pendingEditRequests = {};
+    window.currentPrivateMedia = null;
+    window.rxMagnetChunks = {};
+
+    const badge = document.getElementById('presentingBadge');
+    if (badge) badge.style.display = 'none';
+
+    const stack = document.getElementById('editRequestToastStack');
+    if (stack) stack.innerHTML = '';
+
+    document.querySelectorAll('.magnet-shield').forEach(s => s.style.display = 'none');
+    const editBtn = document.getElementById('magnetEditRequestBtn');
+    if (editBtn) editBtn.style.display = 'none';
+
+    // Drop out of any fullscreen so the next screen isn't stuck expanded.
+    document.querySelectorAll('.pseudo-fullscreen').forEach(el => el.classList.remove('pseudo-fullscreen'));
+    document.body.classList.remove('pseudo-fullscreen-active');
+
+    // Stop both players so audio doesn't keep playing after you've left.
+    try { if (typeof magnetYtPlayer !== 'undefined' && magnetYtPlayer && magnetYtPlayer.stopVideo) magnetYtPlayer.stopVideo(); } catch (e) {}
+    try { if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.stopVideo) ytPlayer.stopVideo(); } catch (e) {}
+
+    // Tear down every remote audio element - otherwise voices can persist.
+    document.querySelectorAll('#remoteAudioSink audio').forEach(a => { a.srcObject = null; a.remove(); });
+
+    // BUG: screen sharing kept running after leaving - the OS "you are sharing
+    // your screen" indicator stayed on and the capture tracks were never
+    // released, which is both a privacy problem and a battery drain.
+    try {
+        if (typeof isScreenSharing !== 'undefined' && isScreenSharing && typeof stopScreenShare === 'function') {
+            stopScreenShare();
+        } else if (typeof localScreenStream !== 'undefined' && localScreenStream) {
+            localScreenStream.getTracks().forEach(t => t.stop());
+            localScreenStream = null;
+        }
+    } catch (e) {}
+
+    // Editor tabs are per-room working files; carrying them into the next room
+    // (or showing a stale tab bar on the home screen) isn't wanted.
+    window.editorTabs = {
+        codeLayer: { files: [], active: 0, seq: 1 },
+        markdownLayer: { files: [], active: 0, seq: 1 }
+    };
+    ['codeTabBar', 'mdTabBar'].forEach(id => {
+        const bar = document.getElementById(id);
+        if (bar) bar.innerHTML = '';
+    });
+
+    // Collapsed dock state shouldn't persist into the lobby.
+    topBarHidden = false;
+    const dock = document.getElementById('topControlsWrapper');
+    if (dock) dock.classList.remove('dock-collapsed');
+    const dockControls = document.querySelector('.top-controls');
+    if (dockControls) dockControls.style.display = 'flex';
+
+    if (typeof updateActiveAppTile === 'function') updateActiveAppTile();
+}
+
 function leaveRoom() { 
+    resetPresentationState();
     // 1. FIREBASE CLEANUP (Host specific)
     if (isHost && peer && peer.id) {
         db.ref('rooms/' + peer.id).remove();
